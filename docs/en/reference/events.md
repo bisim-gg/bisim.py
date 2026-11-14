@@ -307,8 +307,8 @@ Called for every presence change, cached or not. Only with `enable_raw_presences
 
 ### on_voice_state_update(member, before, after) { #on_voice_state_update }
 
-Called when a member joins, leaves or moves between voice channels, or is muted or deafened. Bots cannot
-join voice on Bisim, but they see and can moderate the voice states of others.
+Called when a member joins, leaves or moves between voice channels, or is muted or deafened, the bot
+itself included.
 
 - **member** ([`Member`][bisim.Member]): the member.
 - **before**, **after** ([`VoiceState`][bisim.VoiceState]): the voice state before and after.
@@ -361,6 +361,31 @@ the error is logged.
 
 - **ctx** ([`Context`][bisim.ext.commands.Context])
 - **error** ([`CommandError`][bisim.ext.commands.CommandError])
+
+## bisim.ext.voice_recv { #voice-recv-events }
+
+These are called while a [`VoiceRecvClient`][bisim.ext.voice_recv.VoiceRecvClient] listens. Sinks can listen
+to them too (see [`AudioSink.listener`][bisim.ext.voice_recv.AudioSink.listener]); there they run on the
+receive thread.
+
+### on_voice_member_speaking_start(member) { #on_voice_member_speaking_start }
+
+Called when someone in the bot's voice channel starts speaking.
+
+- **member** ([`Member`][bisim.Member] or [`User`][bisim.User])
+
+### on_voice_member_speaking_stop(member) { #on_voice_member_speaking_stop }
+
+Called when they stop.
+
+- **member** ([`Member`][bisim.Member] or [`User`][bisim.User])
+
+### on_voice_member_disconnect(member, ssrc) { #on_voice_member_disconnect }
+
+Called when someone leaves the bot's voice channel.
+
+- **member** ([`Member`][bisim.Member] or [`User`][bisim.User])
+- **ssrc** (`int`): the number their audio carried in [`FramePacket.ssrc`][bisim.ext.voice_recv.FramePacket].
 
 ## Events that never fire on Bisim
 

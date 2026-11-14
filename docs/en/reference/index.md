@@ -23,6 +23,7 @@ New to the library? Start with the [guide](../guide/index.md). Moving a discord.
 - [Permissions, intents and flags](permissions-and-flags.md).
 - [Webhooks](webhooks.md): posting with a webhook, with or without asyncio.
 - [Abstract base classes](abc.md): `abc.Messageable`, `abc.GuildChannel`, `Object` and `Asset`.
+- [Voice](voice.md): `VoiceClient`, the audio sources and soundboard sounds.
 
 ## Interactions
 
@@ -35,6 +36,7 @@ New to the library? Start with the [guide](../guide/index.md). Moving a discord.
 
 - [bisim.ext.commands](ext-commands.md): prefix commands, converters, checks, cooldowns, cogs and help.
 - [bisim.ext.tasks](ext-tasks.md): background tasks.
+- [bisim.ext.voice_recv](ext-voice-recv.md): receiving voice.
 
 ## More
 

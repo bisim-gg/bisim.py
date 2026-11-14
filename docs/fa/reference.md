@@ -13,12 +13,13 @@
   [Users, members and roles](../../reference/users-and-members/), [Messages](../../reference/messages/),
   [Embeds](../../reference/embeds/), [Emoji and stickers](../../reference/emoji-and-stickers/),
   [Permissions, intents and flags](../../reference/permissions-and-flags/),
-  [Webhooks](../../reference/webhooks/), [Abstract base classes](../../reference/abc/)
+  [Webhooks](../../reference/webhooks/), [Abstract base classes](../../reference/abc/),
+  [Voice](../../reference/voice/)
 - Interactions: [Interactions](../../reference/interactions/),
   [Application commands](../../reference/app-commands/), [Views and components](../../reference/ui/),
   [Interactions URL](../../reference/http-interactions/)
 - Extensions: [bisim.ext.commands](../../reference/ext-commands/),
-  [bisim.ext.tasks](../../reference/ext-tasks/)
+  [bisim.ext.tasks](../../reference/ext-tasks/), [bisim.ext.voice_recv](../../reference/ext-voice-recv/)
 - More: [Enumerations](../../reference/enums/), [Utilities](../../reference/utils/),
   [Exceptions](../../reference/errors/)
 

@@ -78,8 +78,10 @@ The same site is also served at [docs.bisim.gg/py](https://docs.bisim.gg/py/).
 - Change the imports. A word "Discord" in a name becomes "Bisim":
   `discord.DiscordException` is `bisim.BisimException`, `discord.utils` is `bisim.utils`.
 - Intents are accepted and change nothing: a bot sees what its permissions let it see.
-- What Bisim does not have (voice connections, threads, stage and forum channels,
-  scheduled events, sharding) raises `bisim.NotSupported`, a `ClientException`.
+- Voice works as in discord.py (`channel.connect()`, `vc.play()`) with `pip install "bisim.py[voice]"`;
+  receiving is `bisim.ext.voice_recv`. A bot sends sound only and sits in one voice channel per server.
+- What Bisim does not have (threads, stage and forum channels, scheduled events,
+  sharding) raises `bisim.NotSupported`, a `ClientException`.
 - A local Bisim server: `bisim.Client(api_url='http://localhost:3000/api',
   gateway_url='ws://localhost:4000/ws')`, or the `BISIM_API_URL` and
   `BISIM_GATEWAY_URL` environment variables.

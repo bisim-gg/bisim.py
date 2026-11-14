@@ -2,8 +2,8 @@
 
 ## Does my discord.py bot run on Bisim?
 
-Usually, yes, once you change the imports and use a Bisim token. Features Bisim does not have, such as voice
-connections, threads and scheduled events, raise `bisim.NotSupported`. [Moving from
+Usually, yes, once you change the imports and use a Bisim token. Features Bisim does not have, such as
+threads, stage channels and scheduled events, raise `bisim.NotSupported`. [Moving from
 discord.py](moving-from-discord-py.md) lists every difference.
 
 ## Do I need to enable intents?
@@ -35,9 +35,9 @@ permissions in that channel, including the channel's permission overwrites. See
 
 ## Can my bot join a voice channel?
 
-No. Bots cannot connect to voice on Bisim, and `VoiceChannel.connect()` raises `bisim.NotSupported`. A bot
-can still see who is in voice channels (`on_voice_state_update`, `VoiceChannel.members`) and, with the
-permissions, mute, deafen, move or disconnect members.
+Yes. Install `bisim.py[voice]` and use `await channel.connect()` as in discord.py: the bot plays sound with
+`vc.play()` and hears people with `bisim.ext.voice_recv`. A bot sends sound only (no video), sits in one voice
+channel per server and does not join DM calls. See [Voice](topics/voice.md).
 
 ## Why is my embed's image missing?
 

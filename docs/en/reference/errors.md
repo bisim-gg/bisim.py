@@ -26,6 +26,8 @@ The exceptions the library raises. [`NotSupported`][bisim.NotSupported] is the o
 
 ::: bisim.ConnectionClosed
 
+::: bisim.FFmpegProcessError
+
 ::: bisim.InteractionResponded
 
 ::: bisim.MissingApplicationID

@@ -69,7 +69,8 @@ Discord's role hierarchy: the bot can act only on members whose highest role is 
 and never on the server's owner.
 
 Server mute, deafen and moving (`member.edit(mute=True)`, `member.move_to(channel)`) work on members who are
-in a voice channel; for anyone else they raise `bisim.ClientException`. The bot itself cannot join voice.
+in a voice channel; for anyone else they raise `bisim.ClientException`. The bot itself joins voice with
+`channel.connect()` (see [Voice](voice.md)).
 
 ## Roles
 

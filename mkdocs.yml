@@ -179,6 +179,7 @@ plugins:
                     - guide/topics/members-and-roles.md
                     - guide/topics/permissions.md
                     - guide/topics/tasks.md
+                    - guide/topics/voice.md
                     - guide/topics/interactions-url.md
                 - بیشتر:
                     - guide/moving-from-discord-py.md
@@ -253,6 +254,7 @@ nav:
           - guide/topics/members-and-roles.md
           - guide/topics/permissions.md
           - guide/topics/tasks.md
+          - guide/topics/voice.md
           - guide/topics/interactions-url.md
       - More:
           - guide/moving-from-discord-py.md
@@ -272,6 +274,7 @@ nav:
           - reference/permissions-and-flags.md
           - reference/webhooks.md
           - reference/abc.md
+          - reference/voice.md
       - Interactions:
           - reference/interactions.md
           - reference/app-commands.md
@@ -280,6 +283,7 @@ nav:
       - Extensions:
           - reference/ext-commands.md
           - reference/ext-tasks.md
+          - reference/ext-voice-recv.md
       - More:
           - reference/enums.md
           - reference/utils.md

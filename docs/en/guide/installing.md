@@ -57,11 +57,12 @@ The package is called `bisim.py` on PyPI and is imported as `bisim`. It brings i
 
 | Extra | Install with | What it adds |
 | --- | --- | --- |
+| `voice` | `pip install "bisim.py[voice]"` | LiveKit's SDK, to join voice channels, play sound and receive it (see [Voice](topics/voice.md)) |
 | `http` | `pip install "bisim.py[http]"` | PyNaCl, to check the signatures of interactions sent to an [Interactions URL](topics/interactions-url.md) |
 | `speed` | `pip install "bisim.py[speed]"` | orjson, a faster JSON parser the library uses when it is installed |
 
-Extras can be combined: `pip install "bisim.py[http,speed]"`. A bot that receives interactions over the
-gateway, which is what most bots do, needs neither.
+Extras can be combined: `pip install "bisim.py[voice,speed]"`. A bot that receives interactions over the
+gateway, which is what most bots do, does not need `http`; only a bot that joins voice needs `voice`.
 
 ## Check the installation
 

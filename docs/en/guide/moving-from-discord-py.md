@@ -65,8 +65,8 @@ cache is full when `on_ready` runs, as you expect.
 
 ## What Bisim does not have
 
-Bisim has no voice connections for bots, threads, stage, forum or media channels, scheduled events, sharding,
-sticker packs, server templates, widgets, SKUs or premium features. Calling something that needs them raises
+Bisim has no threads, stage, forum or media channels, scheduled events, sharding, video from bots, DM calls
+for bots, sticker packs, server templates, widgets, SKUs or premium features. Calling something that needs them raises
 `bisim.NotSupported`, a subclass of `bisim.ClientException`, with a message naming the feature:
 
 ```python
@@ -80,7 +80,7 @@ Nothing fails silently. Some of the calls that raise it:
 
 | Area | Raises `NotSupported` |
 | --- | --- |
-| Voice | `VoiceChannel.connect()`; a bitrate, user limit or region when creating or editing a voice channel; text chat in voice channels |
+| Voice | a bitrate, user limit or region when creating or editing a voice channel; text chat in voice channels |
 | Channels | threads, stage, forum and announcement channels, following channels, changing a channel's type |
 | Messages | forwarding and publishing messages, changing a message's attachments |
 | Interactions | files, attachments and polls in interaction responses and followups |
@@ -117,6 +117,6 @@ a warning, and the [event reference](../reference/events.md) lists the events th
 1. Change the imports, and `discord.` to `bisim.` (or `import bisim as discord`).
 2. Rename `DiscordException` and `DiscordServerError` if you catch them.
 3. Use a Bisim token.
-4. Search the code for threads, voice connections, stage or forum channels, scheduled events and sharding,
-   and decide what the bot does without them.
+4. Search the code for threads, stage or forum channels, scheduled events and sharding, and decide what the
+   bot does without them. A voice bot needs `pip install "bisim.py[voice]"` (see [Voice](topics/voice.md)).
 5. Run the bot and sync its commands with `tree.sync()` once.
