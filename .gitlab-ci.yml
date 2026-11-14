@@ -11,7 +11,7 @@
 # The runners pull images through the configured mirror, as in the other Bisim projects. If the runner cannot
 # reach PyPI, set PIP_INDEX_URL as a CI/CD variable to a package index it can reach.
 
-stages: [mirror, docs]
+stages: [mirror, docs, publish]
 
 mirror:
   stage: mirror
@@ -48,6 +48,27 @@ docs:
     name: docs-site
     paths: [site/]
     expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Hands the site to docs.bisim.gg: uploads it as the generic package docs-site/latest/site.zip (the site at the zip's
+# root), then starts bisim/docs (project 470), which bakes it into its image at /py/. DOCS_TRIGGER_TOKEN is a pipeline
+# trigger token of bisim/docs, kept as a masked, protected CI variable of this project and never written here.
+publish-docs:
+  stage: publish
+  tags: [linux]
+  image: node:22-alpine
+  needs: [docs]
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - test -n "$DOCS_TRIGGER_TOKEN" || { echo "DOCS_TRIGGER_TOKEN is not set"; exit 1; }
+    - apk add --no-cache curl zip
+    - (cd site && zip -qr "$CI_PROJECT_DIR/site.zip" .)
+    - 'curl -fsS --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file site.zip "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/docs-site/latest/site.zip"'
+    - curl -fsS -o /dev/null -X POST -F "token=$DOCS_TRIGGER_TOKEN" -F ref=main "$CI_API_V4_URL/projects/470/trigger/pipeline"
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
