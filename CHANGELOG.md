@@ -2,7 +2,34 @@
 
 All notable changes to bisim.py are listed here.
 
-## 0.1.0 (unreleased)
+## 0.2.0 (unreleased)
+
+Voice: a bot joins voice channels, plays sound and hears what is said, with
+discord.py's API.
+
+- `pip install "bisim.py[voice]"` adds LiveKit's Python SDK, which carries the
+  sound. There is no PyNaCl, libopus or DAVE to install; `bisim.opus.load_opus()`
+  and `is_loaded()` keep working.
+- `VoiceChannel.connect()` returns a `VoiceClient` with `play`, `pause`, `resume`,
+  `stop`, `is_playing`, `is_paused`, `source`, `move_to`, `disconnect`, `latency`
+  and `average_latency`; `Guild.voice_client`, `Client.voice_clients`,
+  `Guild.change_voice_state` and `VoiceProtocol` for classes of your own.
+- The audio sources: `AudioSource`, `PCMAudio`, `FFmpegAudio`, `FFmpegPCMAudio`,
+  `FFmpegOpusAudio` (decodes to PCM on Bisim) and `PCMVolumeTransformer`, with
+  `after` and `FFmpegProcessError`.
+- The voice client follows the server: a moderator's move, a Disconnect (which
+  calls `after`), a server mute and its unmute, and a lost connection, which
+  joins again while `reconnect` is on.
+- `bisim.ext.voice_recv`, with the API of `discord-ext-voice-recv`:
+  `VoiceRecvClient`, `listen`, `stop_listening`, `AudioSink`, `BasicSink`,
+  `WaveSink`, `UserFilter`, `VoiceData` and the speaking events.
+- `VoiceChannel.send_sound`, `SoundboardSound` and `Guild.fetch_soundboard_sounds`.
+- A Voice page in the guide, in English and Persian.
+
+A bot sends sound only, sits in one voice channel per server and does not join
+DM calls, as on Discord.
+
+## 0.1.0 (2026-11-14)
 
 The first version: the discord.py 2.x API on Bisim's REST API and gateway.
 
