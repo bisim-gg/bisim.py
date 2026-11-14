@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Guide and API reference
+    url: https://bisim-gg.github.io/bisim.py/
+    about: Most questions are answered in the guide.
+  - name: Security problem
+    url: https://github.com/bisim-gg/bisim.py/blob/main/SECURITY.md
+    about: Report it privately to security@bisim.gg, not in an issue.

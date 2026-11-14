@@ -1,0 +1,286 @@
+# The documentation site: the guide in English and Persian, and the API reference generated from the
+# docstrings. Build it with `mkdocs build --strict` after `pip install -e ".[docs]"` (Python 3.10 or newer).
+#
+# DOCS_SITE_URL sets the address the site is served from, base path included, so the same build serves
+# GitHub Pages (https://bisim-gg.github.io/bisim.py/) and https://docs.bisim.gg/py/. Every link between
+# pages is relative; the address is used for the 404 page, the language switcher and the sitemap.
+
+site_name: bisim.py
+site_description: The official Python library for Bisim bots, with the discord.py 2.x API.
+site_author: Bisim
+site_url: !ENV [DOCS_SITE_URL, 'https://bisim-gg.github.io/bisim.py/']
+copyright: Copyright &copy; 2026 Bisim. Released under the MIT License.
+
+# No repo_url: with it, the theme asks the GitHub API for the repository's stars from every visitor's
+# browser, and the site must load nothing from outside. The edit link and the GitHub icon cover it.
+edit_uri: https://github.com/bisim-gg/bisim.py/edit/main/docs/
+
+exclude_docs: |
+  /_ext/
+
+hooks:
+  - docs/_ext/hooks.py
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  # The Persian pages link to the English API reference, which is built only once, outside their folder.
+  unrecognized_links: info
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  # The theme loads Roboto from Google Fonts unless this is off; the fonts are bundled in assets/fonts.
+  font: false
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - assets/stylesheets/bisim.css
+
+extra:
+  generator: false
+  # Relative to the root of the site, so they work under any base path.
+  alternate:
+    - name: English
+      link: ./
+      lang: en
+    - name: فارسی
+      link: fa/
+      lang: fa
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/bisim-gg/bisim.py
+      name: bisim.py on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/bisim.py/
+      name: bisim.py on PyPI
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # Keeps Persian letters in heading anchors (the default drops everything that is not ASCII).
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.highlight:
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search:
+      # Splits words on the half-space (ZWNJ) too, so «پیام» finds «پیام‌ها».
+      separator: '[\s\u200b\u200c\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - i18n:
+      docs_structure: folder
+      # A page that has no Persian version is not copied into the Persian site; the API reference is
+      # in English only and the Persian pages link to it.
+      fallback_to_default: false
+      # The language selector is set up below (extra.alternate) so that it points at the root of each
+      # language, where the theme looks for the sitemap it uses to stay on the same page.
+      reconfigure_material: false
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: fa
+          name: فارسی
+          build: true
+          site_description: کتاب‌خانهٔ رسمی پایتون برای ساخت ربات‌های بی‌سیم، با API نسخهٔ ۲ discord.py.
+          copyright: Copyright &copy; 2026 Bisim. منتشرشده با پروانهٔ MIT.
+          theme:
+            language: fa
+            palette:
+              - media: "(prefers-color-scheme: light)"
+                scheme: default
+                primary: custom
+                accent: custom
+                toggle:
+                  icon: material/weather-night
+                  name: پوستهٔ تیره
+              - media: "(prefers-color-scheme: dark)"
+                scheme: slate
+                primary: custom
+                accent: custom
+                toggle:
+                  icon: material/weather-sunny
+                  name: پوستهٔ روشن
+          nav:
+            - خانه: index.md
+            - راهنما:
+                - شروع کار:
+                    - guide/index.md
+                    - guide/installing.md
+                    - guide/creating-an-application.md
+                    - guide/your-first-bot.md
+                - دستورهای اسلش:
+                    - guide/slash-commands/index.md
+                    - guide/slash-commands/syncing.md
+                    - guide/slash-commands/responding.md
+                    - guide/slash-commands/options.md
+                    - guide/slash-commands/autocomplete.md
+                    - guide/slash-commands/groups.md
+                    - guide/slash-commands/context-menus.md
+                    - guide/slash-commands/permissions.md
+                    - guide/slash-commands/translations.md
+                - دکمه‌ها، منوها و فرم‌ها:
+                    - guide/components/buttons.md
+                    - guide/components/select-menus.md
+                    - guide/components/modals.md
+                - دستورهای پیشوندی:
+                    - guide/commands/index.md
+                    - guide/commands/converters.md
+                    - guide/commands/checks.md
+                    - guide/commands/cooldowns.md
+                    - guide/commands/cogs.md
+                    - guide/commands/help.md
+                - موضوع‌ها:
+                    - guide/topics/events.md
+                    - guide/topics/messages.md
+                    - guide/topics/embeds.md
+                    - guide/topics/members-and-roles.md
+                    - guide/topics/permissions.md
+                    - guide/topics/tasks.md
+                    - guide/topics/interactions-url.md
+                - بیشتر:
+                    - guide/moving-from-discord-py.md
+                    - guide/local-server.md
+                    - guide/faq.md
+            - مرجع API: reference.md
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: numpy
+            docstring_options:
+              # As in discord.py, keyword options taken through **options are listed as parameters.
+              warn_unknown_params: false
+            extensions:
+              # The docstrings are reStructuredText, as in discord.py; this turns them into Markdown.
+              - docs/_ext/griffe_rst.py:RstDocstrings
+            heading_level: 2
+            show_root_heading: true
+            show_root_full_path: true
+            show_root_members_full_path: false
+            show_object_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_source: false
+            show_bases: true
+            members_order: source
+            filters: ["!^_"]
+            show_if_no_docstring: false
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            docstring_section_style: spacy
+            summary: false
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Getting started:
+          - guide/index.md
+          - guide/installing.md
+          - guide/creating-an-application.md
+          - guide/your-first-bot.md
+      - Slash commands:
+          - guide/slash-commands/index.md
+          - guide/slash-commands/syncing.md
+          - guide/slash-commands/responding.md
+          - guide/slash-commands/options.md
+          - guide/slash-commands/autocomplete.md
+          - guide/slash-commands/groups.md
+          - guide/slash-commands/context-menus.md
+          - guide/slash-commands/permissions.md
+          - guide/slash-commands/translations.md
+      - Buttons, menus and modals:
+          - guide/components/buttons.md
+          - guide/components/select-menus.md
+          - guide/components/modals.md
+      - Prefix commands:
+          - guide/commands/index.md
+          - guide/commands/converters.md
+          - guide/commands/checks.md
+          - guide/commands/cooldowns.md
+          - guide/commands/cogs.md
+          - guide/commands/help.md
+      - Topics:
+          - guide/topics/events.md
+          - guide/topics/messages.md
+          - guide/topics/embeds.md
+          - guide/topics/members-and-roles.md
+          - guide/topics/permissions.md
+          - guide/topics/tasks.md
+          - guide/topics/interactions-url.md
+      - More:
+          - guide/moving-from-discord-py.md
+          - guide/local-server.md
+          - guide/faq.md
+  - API reference:
+      - reference/index.md
+      - reference/client.md
+      - reference/events.md
+      - Models:
+          - reference/guilds.md
+          - reference/channels.md
+          - reference/users-and-members.md
+          - reference/messages.md
+          - reference/embeds.md
+          - reference/emoji-and-stickers.md
+          - reference/permissions-and-flags.md
+          - reference/webhooks.md
+          - reference/abc.md
+      - Interactions:
+          - reference/interactions.md
+          - reference/app-commands.md
+          - reference/ui.md
+          - reference/http-interactions.md
+      - Extensions:
+          - reference/ext-commands.md
+          - reference/ext-tasks.md
+      - More:
+          - reference/enums.md
+          - reference/utils.md
+          - reference/errors.md

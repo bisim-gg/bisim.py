@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bisim.py"
+version = "0.1.0"
+description = "The official Python library for building Bisim bots, with the discord.py 2.x API."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Bisim" }, { name = "Rapptz (discord.py)" }]
+requires-python = ">=3.9"
+dependencies = ["aiohttp>=3.8,<4"]
+keywords = ["bisim", "bot", "chat", "api", "discord.py"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+# Verifying signed interactions sent to an Interactions URL (Ed25519).
+http = ["PyNaCl>=1.5"]
+speed = ["orjson>=3.5"]
+# aioresponses 0.7 breaks on aiohttp 3.14 (the library itself works with it), so the tests stay below.
+test = ["pytest>=7.4,<9", "pytest-asyncio>=0.23,<1", "aioresponses>=0.7.6", "aiohttp<3.14", "PyNaCl>=1.5"]
+# Building the documentation site with `mkdocs build --strict` (Python 3.10 or newer).
+docs = [
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-material>=9.7,<9.8",
+    "mkdocs-static-i18n>=1.3.1,<2",
+    "mkdocstrings>=1.0.6,<2",
+    "mkdocstrings-python>=2.0.9,<3",
+    "griffelib>=2.3,<3",
+    # mkdocstrings 1.0 does not work with pymdown-extensions 12 yet.
+    "pymdown-extensions>=10.16,<12",
+    # Formats the signatures in the API reference.
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/bisim-gg/bisim.py"
+Documentation = "https://bisim-gg.github.io/bisim.py/"
+"Documentation mirror" = "https://docs.bisim.gg/py/"
+Changelog = "https://github.com/bisim-gg/bisim.py/blob/main/CHANGELOG.md"
+Issues = "https://github.com/bisim-gg/bisim.py/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bisim"]
+
+[tool.hatch.build.targets.sdist]
+include = ["bisim", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:aiohttp.*"]

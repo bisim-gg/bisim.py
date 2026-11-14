@@ -1,0 +1,299 @@
+/*
+ * Bisim's look on Material for MkDocs.
+ *
+ * Fonts are bundled (assets/fonts, SIL Open Font License): Inter for Latin text and Vazirmatn for
+ * Persian. Signal green is a fill and always carries ink; a green that is read uses Deep Signal on light
+ * and Signal on dark; links stay blue, as in Bisim itself.
+ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/inter-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/inter-latin-wght-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/inter-latin-ext-wght-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+    U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Vazirmatn";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/vazirmatn-wght.woff2") format("woff2");
+}
+
+:root {
+  --bisim-signal: #c8f53c;
+  --bisim-signal-hover: #b9e62f;
+  --bisim-ink: #0f1115;
+  --md-text-font: "Inter", "Vazirmatn";
+}
+
+:root:lang(fa) {
+  --md-text-font: "Vazirmatn", "Inter";
+}
+
+/* Light */
+[data-md-color-scheme="default"] {
+  --bisim-primary-ink: #3f5600;
+  --bisim-link: #1a66d6;
+  --bisim-header-border: #e3e5de;
+
+  --md-primary-fg-color: #ffffff;
+  --md-primary-fg-color--light: #ffffff;
+  --md-primary-fg-color--dark: #f3f4ef;
+  --md-primary-bg-color: #0f1115;
+  --md-primary-bg-color--light: #565b64;
+  --md-accent-fg-color: #3f5600;
+  --md-accent-fg-color--transparent: rgba(63, 86, 0, 0.1);
+  --md-accent-bg-color: #0f1115;
+  --md-accent-bg-color--light: #565b64;
+
+  --md-default-fg-color--light: #565b64;
+  --md-code-bg-color: #f3f4ef;
+  --md-typeset-a-color: var(--bisim-link);
+  --md-footer-bg-color: #0f1115;
+  --md-footer-bg-color--dark: #0b0d10;
+}
+
+/* Dark */
+[data-md-color-scheme="slate"] {
+  --bisim-primary-ink: #c8f53c;
+  --bisim-link: #5197ed;
+  --bisim-header-border: #262a31;
+
+  --md-default-bg-color: #0f1115;
+  --md-default-bg-color--light: #13161b;
+  --md-default-fg-color: #eceee8;
+  --md-default-fg-color--light: #a7abb2;
+  --md-default-fg-color--lighter: #6b7078;
+  --md-default-fg-color--lightest: #262a31;
+
+  --md-primary-fg-color: #0f1115;
+  --md-primary-fg-color--light: #13161b;
+  --md-primary-fg-color--dark: #191c22;
+  --md-primary-bg-color: #eceee8;
+  --md-primary-bg-color--light: #a7abb2;
+  --md-accent-fg-color: #c8f53c;
+  --md-accent-fg-color--transparent: rgba(200, 245, 60, 0.12);
+  --md-accent-bg-color: #0f1115;
+
+  --md-code-bg-color: #191c22;
+  --md-code-fg-color: #e3e5de;
+  --md-typeset-color: #eceee8;
+  --md-typeset-a-color: var(--bisim-link);
+  --md-footer-bg-color: #0b0d10;
+  --md-footer-bg-color--dark: #08090b;
+}
+
+/* The header and the tabs sit on the page colour, with a hairline below. */
+.md-header {
+  border-block-end: 1px solid var(--bisim-header-border);
+  box-shadow: none;
+}
+
+.md-header--shadow {
+  box-shadow: none;
+}
+
+.md-tabs {
+  border-block-end: 1px solid var(--bisim-header-border);
+}
+
+.md-tabs__link--active,
+.md-tabs__item--active .md-tabs__link {
+  color: var(--bisim-primary-ink);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.md-search__form {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Navigation: the current page reads in the brand's read green. */
+.md-nav__link--active,
+.md-nav__item .md-nav__link--active {
+  color: var(--bisim-primary-ink);
+  font-weight: 600;
+}
+
+/* Links are blue, never the theme's green. */
+.md-typeset a {
+  color: var(--bisim-link);
+}
+
+.md-typeset a:hover,
+.md-typeset a:focus {
+  color: var(--bisim-link);
+  text-decoration: underline;
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--bisim-link) 30%, transparent);
+}
+
+/* Buttons: the primary one is a Signal fill with ink on it. */
+.md-typeset .md-button {
+  border-radius: 0.5rem;
+  color: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color--lightest);
+}
+
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  color: var(--md-default-fg-color);
+  background-color: var(--md-default-fg-color--lightest);
+  border-color: var(--md-default-fg-color--lightest);
+  text-decoration: none;
+}
+
+.md-typeset .md-button--primary,
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus {
+  background-color: var(--bisim-signal);
+  border-color: var(--bisim-signal);
+  color: var(--bisim-ink);
+}
+
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus {
+  background-color: var(--bisim-signal-hover);
+  border-color: var(--bisim-signal-hover);
+}
+
+/* The home page. */
+.bisim-hero {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  margin-block: 1.5rem 2.5rem;
+}
+
+.bisim-hero__logo {
+  flex: none;
+  width: 7.5rem;
+  height: 7.5rem;
+}
+
+.bisim-hero__text h1 {
+  margin: 0 0 0.4rem;
+  font-weight: 700;
+  color: var(--md-default-fg-color);
+}
+
+.bisim-hero__tagline {
+  margin: 0 0 1.2rem;
+  font-size: 1.05rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.bisim-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.bisim-hero__actions .md-button {
+  margin: 0;
+}
+
+.bisim-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin-block: 1rem 2rem;
+}
+
+.bisim-feature {
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.6rem;
+  background-color: var(--md-default-bg-color);
+}
+
+.bisim-feature h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+}
+
+.bisim-feature p {
+  margin: 0;
+  color: var(--md-default-fg-color--light);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .bisim-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .bisim-hero__logo {
+    width: 4.5rem;
+    height: 4.5rem;
+  }
+}
+
+/* Persian: more room between lines, Persian list numbers, and code that always reads left to right. */
+:root:lang(fa) .md-typeset {
+  line-height: 1.85;
+}
+
+:root:lang(fa) .md-typeset ol {
+  list-style-type: persian;
+}
+
+[dir="rtl"] .md-typeset pre,
+[dir="rtl"] .md-typeset pre > code {
+  direction: ltr;
+  text-align: left;
+}
+
+[dir="rtl"] .md-typeset :not(pre) > code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* The API reference: a little more space between objects. */
+.doc-object + .doc-object {
+  margin-block-start: 1.5rem;
+}
+
+.doc-heading code {
+  font-weight: 600;
+}

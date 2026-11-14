@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest something bisim.py should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: The bot you are building and what you cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: How it could work
+      description: If discord.py has this feature, name the class, method, event or decorator, so bisim.py can match it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: checkboxes
+    id: bisim
+    attributes:
+      label: Bisim
+      options:
+        - label: I checked the "Moving from discord.py" page, and this is not listed as missing on Bisim.

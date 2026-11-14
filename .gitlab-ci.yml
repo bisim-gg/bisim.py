@@ -1,0 +1,54 @@
+# CI for the GitLab copy of bisim.py (git.vmp.ir/bisim/bisim.py). The primary repository is
+# github.com/bisim-gg/bisim.py; GitLab CE has no pull mirror, so a scheduled pipeline copies it here.
+#
+# Set up once in this project:
+#   - a project access token with the write_repository scope (role Maintainer), stored as the CI/CD variable
+#     MIRROR_PUSH_TOKEN, masked and protected; it is never written in this file;
+#   - a pipeline schedule (CI/CD, Schedules), for example every 15 minutes, on the default branch;
+#   - "Allowed to force push" for Maintainers on protected branches, so the mirror can follow a rewritten
+#     history on GitHub.
+#
+# The runners pull images through the configured mirror, as in the other Bisim projects. If the runner cannot
+# reach PyPI, set PIP_INDEX_URL as a CI/CD variable to a package index it can reach.
+
+stages: [mirror, docs]
+
+mirror:
+  stage: mirror
+  tags: [linux]
+  image: python:3.12-alpine
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - apk add --no-cache git
+  script:
+    - test -n "$MIRROR_PUSH_TOKEN" || { echo "MIRROR_PUSH_TOKEN is not set"; exit 1; }
+    - git clone --mirror https://github.com/bisim-gg/bisim.py.git source.git
+    - cd source.git
+    - git push --force "https://oauth2:${MIRROR_PUSH_TOKEN}@git.vmp.ir/bisim/bisim.py.git" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+docs:
+  stage: docs
+  tags: [linux]
+  image: python:3.12-slim
+  variables:
+    # Served at https://docs.bisim.gg/py/
+    DOCS_SITE_URL: https://docs.bisim.gg/py/
+    PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+  cache:
+    key:
+      files: [pyproject.toml]
+    paths: [.cache/pip/]
+  script:
+    - python -m pip install -e ".[docs]"
+    - mkdocs build --strict
+  artifacts:
+    name: docs-site
+    paths: [site/]
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
