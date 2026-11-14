@@ -1691,7 +1691,7 @@ class Connectable(Protocol):
     async def connect(
         self,
         *,
-        timeout: float = 60.0,
+        timeout: float = 30.0,
         reconnect: bool = True,
         cls: Callable[[Client, Connectable], VoiceProtocolT] = VoiceClient,
         self_deaf: bool = False,

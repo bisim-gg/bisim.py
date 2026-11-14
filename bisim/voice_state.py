@@ -85,7 +85,7 @@ class VoiceConnectionState:
         self.voice_client = voice_client
         self.loop: asyncio.AbstractEventLoop = voice_client.loop
         self.reconnect: bool = True
-        self.timeout: float = 60.0
+        self.timeout: float = 30.0
         self.self_mute: bool = False
         self.self_deaf: bool = False
         self.server_mute: bool = False
