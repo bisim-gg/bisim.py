@@ -49,8 +49,10 @@ from .mixins import Hashable
 from .object import Object
 from .permissions import PermissionOverwrite, Permissions
 from .role import Role
+from .soundboard import SoundboardSound
 from .sticker import GuildSticker
 from .user import User
+from .voice_client import VoiceClient, VoiceProtocol
 
 if TYPE_CHECKING:
     from .abc import GuildChannel, Snowflake
@@ -490,9 +492,9 @@ class Guild(Hashable):
         return False
 
     @property
-    def voice_client(self) -> None:
-        """Always ``None``: a bot cannot join voice on Bisim."""
-        return None
+    def voice_client(self) -> Optional[VoiceProtocol]:
+        """Optional[:class:`VoiceProtocol`]: Returns the :class:`VoiceProtocol` associated with this guild, if any."""
+        return self._state._get_voice_client(self.id)
 
     @property
     def text_channels(self) -> List[TextChannel]:
@@ -665,8 +667,8 @@ class Guild(Hashable):
         return self._state._upload_limit or DEFAULT_FILESIZE_LIMIT
 
     @property
-    def soundboard_sounds(self) -> List[Any]:
-        """List[Any]: Not loaded by the library yet."""
+    def soundboard_sounds(self) -> List[SoundboardSound]:
+        """List[:class:`SoundboardSound`]: Not kept by the library; use :meth:`fetch_soundboard_sounds`."""
         return []
 
     @property
@@ -2105,6 +2107,109 @@ class Guild(Hashable):
             An error occurred deleting the sticker.
         """
         await self._state.http.delete_guild_sticker(self.id, sticker.id, reason=reason)
+
+    async def fetch_soundboard_sounds(self) -> List[SoundboardSound]:
+        """|coro|
+
+        Retrieves all the soundboard sounds of this guild.
+
+        Raises
+        -------
+        HTTPException
+            Retrieving the sounds failed.
+
+        Returns
+        --------
+        List[:class:`SoundboardSound`]
+            The guild's sounds.
+        """
+        data = await self._state.http.get_soundboard_sounds(self.id)
+        return [SoundboardSound(guild=self, state=self._state, data=d) for d in data or []]
+
+    async def fetch_soundboard_sound(self, sound_id: int, /) -> SoundboardSound:
+        """|coro|
+
+        Retrieves one of this guild's soundboard sounds.
+
+        Parameters
+        -----------
+        sound_id: :class:`int`
+            The ID of the sound.
+
+        Raises
+        -------
+        NotFound
+            The sound is not one of this guild's.
+        HTTPException
+            Retrieving the sound failed.
+
+        Returns
+        --------
+        :class:`SoundboardSound`
+            The sound.
+        """
+        for sound in await self.fetch_soundboard_sounds():
+            if sound.id == sound_id:
+                return sound
+        from .http import _ResponseLike
+
+        raise NotFound(_ResponseLike(404, 'Not Found'), 'Unknown sound')  # type: ignore
+
+    # ------------------------------------------------------------------
+    # Voice
+    # ------------------------------------------------------------------
+
+    async def change_voice_state(
+        self, *, channel: Optional[abc.Snowflake], self_mute: bool = False, self_deaf: bool = False
+    ) -> None:
+        """|coro|
+
+        Changes client's voice state in the guild.
+
+        On Bisim this joins the channel over REST (or leaves it, or changes
+        the bot's own mute and deafen when it stays). With a
+        :class:`VoiceClient` connected here, the voice client follows: a new
+        channel moves it, ``None`` disconnects it. With a voice protocol of
+        your own, the join's answer reaches its
+        :meth:`VoiceProtocol.on_voice_server_update`.
+
+        Parameters
+        -----------
+        channel: Optional[:class:`abc.Snowflake`]
+            Channel the client wants to join. Use ``None`` to disconnect.
+        self_mute: :class:`bool`
+            Indicates if the client should be self-muted.
+        self_deaf: :class:`bool`
+            Indicates if the client should be self-deafened.
+        """
+        state = self._state
+        voice = state._get_voice_client(self.id)
+        if isinstance(voice, VoiceClient):
+            await voice._change_voice_state(channel, self_mute=self_mute, self_deaf=self_deaf)
+            return
+
+        http = state.http
+        # Where the server last said the bot is.
+        current: Optional[int] = None
+        if state.self_id is not None:
+            mine = self._voice_states.get(state.self_id)
+            if mine is not None and mine.channel is not None:
+                current = mine.channel.id
+
+        if channel is None:
+            if current is not None:
+                await http.leave_voice(current)
+            return
+
+        if channel.id == current:
+            await http.edit_voice_state(channel.id, selfMuted=self_mute, selfDeafened=self_deaf)
+            return
+
+        data = await http.join_voice(channel.id, self_muted=self_mute, self_deafened=self_deaf)
+        if voice is not None:
+            payload = dict(data or {})
+            payload.update(guild_id=str(self.id), channel_id=str(channel.id), endpoint=payload.get('url'))
+            await voice.on_voice_server_update(payload)
 
     # ------------------------------------------------------------------
     # Server settings

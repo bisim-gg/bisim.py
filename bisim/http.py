@@ -807,6 +807,26 @@ class HTTPClient:
         return self.request(r, json=payload, params=params, auth=False)
 
     # ------------------------------------------------------------------
+    # Voice: the bot's own connection
+    # ------------------------------------------------------------------
+
+    def join_voice(self, channel_id: Any, *, self_muted: bool = False, self_deafened: bool = False) -> Coroutine[Any, Any, Any]:
+        r = Route('POST', '/channels/{channel_id}/voice/join', channel_id=_snowflake_str(channel_id))
+        return self.request(r, json={'selfMuted': bool(self_muted), 'selfDeafened': bool(self_deafened)})
+
+    def leave_voice(self, channel_id: Any) -> Coroutine[Any, Any, Any]:
+        r = Route('POST', '/channels/{channel_id}/voice/leave', channel_id=_snowflake_str(channel_id))
+        return self.request(r, json={})
+
+    def edit_voice_state(self, channel_id: Any, **fields: Any) -> Coroutine[Any, Any, Any]:
+        r = Route('PATCH', '/channels/{channel_id}/voice/state', channel_id=_snowflake_str(channel_id))
+        return self.request(r, json=fields)
+
+    def send_soundboard_sound(self, channel_id: Any, sound_id: Any) -> Coroutine[Any, Any, Any]:
+        r = Route('POST', '/channels/{channel_id}/soundboard/play', channel_id=_snowflake_str(channel_id))
+        return self.request(r, json={'soundId': _snowflake_str(sound_id)})
+
+    # ------------------------------------------------------------------
     # Voice moderation
     # ------------------------------------------------------------------
 

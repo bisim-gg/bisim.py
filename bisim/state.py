@@ -59,6 +59,7 @@ from .sticker import GuildSticker
 from .ui.modal import _modal_fields
 from .ui.view import View, ViewStore
 from .user import ClientUser, User
+from .voice_client import VoiceProtocol
 
 if TYPE_CHECKING:
     from .abc import PrivateChannel
@@ -174,6 +175,7 @@ class ConnectionState:
         self._private_channels: Dict[int, Any] = {}
         self._private_channels_by_user: Dict[int, DMChannel] = {}
         self._subscribe_waiters: Dict[int, asyncio.Future[bool]] = {}
+        self._voice_clients: Dict[int, VoiceProtocol] = {}
         # Presence snapshots that arrive before a server's members are loaded.
         self._pending_presences: Dict[int, List[Dict[str, Any]]] = {}
         self._ready_state_done: bool = False
@@ -228,6 +230,29 @@ class ConnectionState:
     @property
     def persistent_views(self) -> Sequence[View]:
         return self._view_store.persistent_views
+
+    @property
+    def voice_clients(self) -> List[VoiceProtocol]:
+        return list(self._voice_clients.values())
+
+    def _get_voice_client(self, guild_id: Optional[int]) -> Optional[VoiceProtocol]:
+        return self._voice_clients.get(guild_id)  # type: ignore
+
+    def _add_voice_client(self, guild_id: int, voice: VoiceProtocol) -> None:
+        self._voice_clients[guild_id] = voice
+
+    def _remove_voice_client(self, guild_id: int, voice: Optional[VoiceProtocol] = None) -> None:
+        if voice is not None and self._voice_clients.get(guild_id) is not voice:
+            return
+        self._voice_clients.pop(guild_id, None)
+
+    async def close_voice_clients(self) -> None:
+        for voice in self.voice_clients:
+            try:
+                await voice.disconnect(force=True)
+            except Exception:
+                # if an error happens during disconnects, disregard it.
+                pass
 
     def _spawn(self, coro: Coroutine[Any, Any, Any], *, name: str) -> asyncio.Task[Any]:
         task = asyncio.get_running_loop().create_task(coro, name=name)
@@ -1183,6 +1208,11 @@ class ConnectionState:
         if guild is None or not payload.get('userId'):
             return
         channel_id = utils._snowflake(data.get('channelId'))
+        if int(payload['userId']) == self.self_id:
+            voice = self._get_voice_client(guild.id)
+            if voice is not None:
+                raw = dict(payload, channelId=data.get('channelId'), guildId=data.get('guildId'))
+                self._spawn(voice.on_voice_state_update(raw), name='bisim: voice state update')
         member, before, after = guild._update_voice_state(payload, channel_id)
         if member is not None:
             self.dispatch('voice_state_update', member, before, after)
@@ -1196,6 +1226,15 @@ class ConnectionState:
         before = channel.status
         channel.status = (data.get('voiceChannelStatus') or {}).get('status') or None
         self.dispatch('voice_channel_status_update', channel, before, channel.status)
+
+    def parse_voice_move(self, data: Dict[str, Any]) -> None:
+        # A moderator moved the bot; only the bot's own user room gets this.
+        payload = data.get('voiceMove') or {}
+        guild_id = utils._snowflake(payload.get('guildId') or data.get('guildId'))
+        voice = self._get_voice_client(guild_id)
+        if voice is None:
+            return
+        self._spawn(voice.on_voice_move(dict(payload)), name='bisim: voice move')
 
     def parse_user_update(self, data: Dict[str, Any]) -> None:
         payload = (data.get('userUpdate') or {}).get('user') or {}
@@ -1255,7 +1294,6 @@ class ConnectionState:
     parse_relationship_update = _ignore
     parse_call_update = _ignore
     parse_voice_poke = _ignore
-    parse_voice_move = _ignore
     parse_soundboard_play = _ignore
     parse_user_layout_update = _ignore
     parse_guild_sound_create = _ignore

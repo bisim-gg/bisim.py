@@ -33,11 +33,13 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# Voice: joining voice channels, playing and receiving sound, over LiveKit's official SDK (it brings numpy).
+voice = ["livekit>=1.2,<2"]
 # Verifying signed interactions sent to an Interactions URL (Ed25519).
 http = ["PyNaCl>=1.5"]
 speed = ["orjson>=3.5"]
 # aioresponses 0.7 breaks on aiohttp 3.14 (the library itself works with it), so the tests stay below.
-test = ["pytest>=7.4,<9", "pytest-asyncio>=0.23,<1", "aioresponses>=0.7.6", "aiohttp<3.14", "PyNaCl>=1.5"]
+test = ["pytest>=7.4,<9", "pytest-asyncio>=0.23,<1", "aioresponses>=0.7.6", "aiohttp<3.14", "PyNaCl>=1.5", "numpy"]
 # Building the documentation site with `mkdocs build --strict` (Python 3.10 or newer).
 docs = [
     "mkdocs>=1.6.1,<2",

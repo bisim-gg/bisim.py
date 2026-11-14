@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .member import Member, VoiceState
     from .message import Message, PartialMessage
     from .role import Role
+    from .soundboard import SoundboardSound
     from .state import ConnectionState
     from .user import BaseUser, ClientUser, User
     from .webhook import Webhook
@@ -581,10 +582,11 @@ class TextChannel(abc.Messageable, abc.GuildChannel, Hashable):
 class VoiceChannel(abc.Connectable, abc.GuildChannel, Hashable):
     """Represents a Bisim guild voice channel.
 
-    A bot cannot join voice on Bisim, and Bisim's voice channels have no
-    text chat, so :meth:`connect` and :meth:`send` raise
-    :exc:`~bisim.NotSupported`. The bot can see who is in the channel and
-    move, mute or disconnect them.
+    A bot joins with :meth:`connect` (``pip install "bisim.py[voice]"``),
+    plays sound into the channel and can hear it with
+    :mod:`bisim.ext.voice_recv`. Bisim's voice channels have no text chat, so
+    :meth:`send` raises :exc:`~bisim.NotSupported`. The bot can also see who
+    is in the channel and move, mute or disconnect them.
 
     .. container:: operations
 
@@ -730,6 +732,40 @@ class VoiceChannel(abc.Connectable, abc.GuildChannel, Hashable):
     def scheduled_events(self) -> List[Any]:
         """List[Any]: Always empty: Bisim has no scheduled events."""
         return []
+
+    def _get_voice_client_key(self) -> Tuple[int, str]:
+        return self.guild.id, 'guild_id'
+
+    def _get_voice_state_pair(self) -> Tuple[int, int]:
+        return self.guild.id, self.id
+
+    async def send_sound(self, sound: Union[SoundboardSound, abc.Snowflake], /) -> None:
+        """|coro|
+
+        Sends a soundboard sound for this channel.
+
+        The bot must be connected to this channel (see :meth:`connect`) and
+        have :attr:`~Permissions.speak` and :attr:`~Permissions.use_soundboard`.
+        Everyone in the channel hears the sound; it does not go through the
+        bot's own audio.
+
+        Parameters
+        ------------
+        sound: Union[:class:`SoundboardSound`, :class:`abc.Snowflake`]
+            The sound to send for this channel, one of this server's sounds.
+
+        Raises
+        -------
+        Forbidden
+            You do not have permissions to send a sound to this channel, or
+            you are server muted.
+        NotFound
+            The sound is not one of this server's, or the bot is not in the
+            channel.
+        HTTPException
+            Sending the sound failed (too many sounds at once answer 429).
+        """
+        await self._state.http.send_soundboard_sound(self.id, sound.id)
 
     def permissions_for(self, obj: Union[Member, Role], /) -> Permissions:
         base = super().permissions_for(obj)

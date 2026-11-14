@@ -63,6 +63,7 @@ from .state import ConnectionState
 from .sticker import GuildSticker
 from .ui.view import View
 from .user import ClientUser, User
+from .voice_client import VoiceProtocol
 from .webhook import Webhook
 
 if TYPE_CHECKING:
@@ -307,9 +308,12 @@ class Client:
         return self._connection.private_channels
 
     @property
-    def voice_clients(self) -> List[Any]:
-        """List[:class:`.VoiceProtocol`]: Always empty: a bot cannot join voice on Bisim."""
-        return []
+    def voice_clients(self) -> List[VoiceProtocol]:
+        """List[:class:`.VoiceProtocol`]: Represents a list of voice connections.
+
+        These are usually :class:`.VoiceClient` instances.
+        """
+        return self._connection.voice_clients
 
     @property
     def application_id(self) -> Optional[int]:
@@ -561,6 +565,8 @@ class Client:
         async def _close() -> None:
             self._closed = True
             self._connection._cancel_bootstrap()
+
+            await self._connection.close_voice_clients()
 
             if self.ws is not None and self.ws.open:
                 await self.ws.close(code=1000)

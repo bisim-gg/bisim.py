@@ -29,6 +29,7 @@ __all__ = (
     'InteractionResponded',
     'MissingApplicationID',
     'NotSupported',
+    'FFmpegProcessError',
 )
 
 APP_ID_NOT_FOUND = (
@@ -50,6 +51,16 @@ class ClientException(BisimException):
     """Exception that's raised when an operation in the :class:`Client` fails.
 
     These are usually for exceptions that happened due to user input.
+    """
+
+    pass
+
+
+class FFmpegProcessError(ClientException):
+    """Exception that's raised when an FFmpeg process fails.
+
+    It reaches the ``after`` callback of :meth:`VoiceClient.play` when ffmpeg
+    exits with an error while an :class:`FFmpegAudio` source is playing.
     """
 
     pass

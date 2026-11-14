@@ -23,6 +23,7 @@ from typing import Literal, NamedTuple
 
 from . import abc as abc
 from . import app_commands as app_commands
+from . import opus as opus
 from . import ui as ui
 from . import utils as utils
 from .activity import *
@@ -48,12 +49,15 @@ from .message import *
 from .object import *
 from .partial_emoji import *
 from .permissions import *
+from .player import *
 from .poll import *
 from .raw_models import *
 from .reaction import *
 from .role import *
+from .soundboard import *
 from .sticker import *
 from .user import *
+from .voice_client import *
 from .webhook import *
 
 

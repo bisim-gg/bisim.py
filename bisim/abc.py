@@ -33,11 +33,13 @@ from .file import File
 from .invite import Invite
 from .mentions import AllowedMentions
 from .permissions import PermissionOverwrite, Permissions
+from .voice_client import VoiceClient, VoiceProtocol
 
 if TYPE_CHECKING:
     from typing_extensions import Self
 
     from .asset import Asset
+    from .client import Client
     from .channel import CategoryChannel, DMChannel, GroupChannel, PartialMessageable, TextChannel, VoiceChannel
     from .embeds import Embed
     from .guild import Guild
@@ -62,6 +64,7 @@ __all__ = (
 )
 
 T = TypeVar('T', bound=type)
+VoiceProtocolT = TypeVar('VoiceProtocolT', bound=VoiceProtocol)
 
 
 @runtime_checkable
@@ -1671,20 +1674,93 @@ class Connectable(Protocol):
     """An ABC that details the common operations on a channel that can
     connect to a voice server.
 
-    Bots cannot join voice on Bisim, so :meth:`connect` always raises
-    :exc:`~bisim.NotSupported`.
+    The following implement this ABC:
+
+    - :class:`~bisim.VoiceChannel`
     """
 
     __slots__ = ()
+    _state: ConnectionState
 
-    async def connect(self, *, timeout: float = 30.0, reconnect: bool = True, cls: Any = None, self_deaf: bool = False, self_mute: bool = False) -> Any:
+    def _get_voice_client_key(self) -> Tuple[int, str]:
+        raise NotImplementedError
+
+    def _get_voice_state_pair(self) -> Tuple[int, int]:
+        raise NotImplementedError
+
+    async def connect(
+        self,
+        *,
+        timeout: float = 60.0,
+        reconnect: bool = True,
+        cls: Callable[[Client, Connectable], VoiceProtocolT] = VoiceClient,
+        self_deaf: bool = False,
+        self_mute: bool = False,
+    ) -> VoiceProtocolT:
         """|coro|
 
-        Not supported on Bisim: a bot cannot join voice.
+        Connects to voice and creates a :class:`~bisim.VoiceClient` to establish
+        your connection to the voice server.
+
+        Voice needs LiveKit's Python SDK: ``pip install "bisim.py[voice]"``.
+        A bot sends sound only, sits in one voice channel per server and
+        cannot join DM calls.
+
+        Parameters
+        -----------
+        timeout: :class:`float`
+            The timeout in seconds to wait the connection to complete.
+        reconnect: :class:`bool`
+            Whether the bot should automatically join again if the voice
+            connection is lost.
+        cls: Type[:class:`~bisim.VoiceProtocol`]
+            A type that subclasses :class:`~bisim.VoiceProtocol` to connect with.
+            Defaults to :class:`~bisim.VoiceClient`.
+        self_mute: :class:`bool`
+            Indicates if the client should be self-muted.
+        self_deaf: :class:`bool`
+            Indicates if the client should be self-deafened.
 
         Raises
         -------
-        NotSupported
-            Always.
+        asyncio.TimeoutError
+            Could not connect to the voice channel in time.
+        ~bisim.ClientException
+            You are already connected to a voice channel.
+        ~bisim.Forbidden
+            The bot may not connect to this channel.
+        RuntimeError
+            LiveKit's SDK is not installed (``bisim.py[voice]``).
+
+        Returns
+        --------
+        :class:`~bisim.VoiceProtocol`
+            A voice client that is fully connected to the voice server.
         """
-        raise NotSupported('Joining voice channels as a bot')
+
+        key_id, _ = self._get_voice_client_key()
+        state = self._state
+
+        if state._get_voice_client(key_id):
+            raise ClientException('Already connected to a voice channel.')
+
+        client = state._get_client()
+        voice: VoiceProtocolT = cls(client, self)
+
+        if not isinstance(voice, VoiceProtocol):
+            raise TypeError('Type must meet VoiceProtocol abstract base class.')
+
+        state._add_voice_client(key_id, voice)
+
+        try:
+            await voice.connect(timeout=timeout, reconnect=reconnect, self_deaf=self_deaf, self_mute=self_mute)
+        except BaseException:
+            # A refused or timed out join leaves nothing behind (discord.py does this for a timeout only).
+            try:
+                await voice.disconnect(force=True)
+            except Exception:
+                pass
+            state._remove_voice_client(key_id, voice)
+            raise
+
+        return voice
