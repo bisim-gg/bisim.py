@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import logging
+import re
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Protocol, Union
 
 from . import utils
@@ -10,6 +12,29 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
 __all__ = ('Embed',)
+
+_log = logging.getLogger(__name__)
+
+# Bisim's (and Discord's) cap on an embed picture's address.
+_PICTURE_URL_MAX = 2048
+_WEB_URL = re.compile(r'^https?://[^/?#\s]', re.IGNORECASE)
+_warned_picture = False
+
+
+def _picture_url(url: Any) -> Optional[str]:
+    """A picture's address as Bisim takes it: an http or https link of at most
+    2048 characters. Anything else (discord.py's ``attachment://`` above all) is
+    left out with a warning, since Bisim would refuse the whole message for it."""
+    global _warned_picture
+    if not url:
+        return None
+    url = str(url)
+    if _WEB_URL.match(url) and len(url) <= _PICTURE_URL_MAX:
+        return url
+    if not _warned_picture:
+        _warned_picture = True
+        _log.warning('Embed pictures that are not http or https links (such as attachment://) are not shown on Bisim and were left out.')
+    return None
 
 
 class EmbedProxy:
@@ -74,9 +99,9 @@ class Embed:
     .. note::
 
         Bisim shows an embed's title, description, link, colour, timestamp,
-        author (name and link), footer text and fields. Images, thumbnails
-        and icons can be set, and are kept on this object, but Bisim does
-        not show them and they are not sent.
+        author (name, link and icon), footer (text and icon), fields, image
+        and thumbnail. A picture must be an HTTP(S) link: an
+        ``attachment://`` one is kept on this object but not sent.
 
     Attributes
     -----------
@@ -155,7 +180,7 @@ class Embed:
         data: :class:`dict`
             The dictionary to convert into an embed.
         """
-        if any(key in data for key in ('siteName', 'imageUrl', 'authorName', 'footerText', 'authorUrl')):
+        if any(key in data for key in ('siteName', 'imageUrl', 'authorName', 'footerText', 'authorUrl', 'thumbnailUrl')):
             return cls._from_bisim(data)
 
         self = cls.__new__(cls)
@@ -214,9 +239,17 @@ class Embed:
                 author['name'] = data['authorName']
             if data.get('authorUrl'):
                 author['url'] = data['authorUrl']
+            if data.get('authorIconUrl'):
+                # Bisim shows a picture from its own address: there is no proxy.
+                author['icon_url'] = author['proxy_icon_url'] = data['authorIconUrl']
             self._author = author
         if data.get('footerText'):
-            self._footer = {'text': data['footerText']}
+            footer: Dict[str, Any] = {'text': data['footerText']}
+            if data.get('footerIconUrl'):
+                footer['icon_url'] = footer['proxy_icon_url'] = data['footerIconUrl']
+            self._footer = footer
+        if data.get('thumbnailUrl'):
+            self._thumbnail = {'url': data['thumbnailUrl'], 'proxy_url': data['thumbnailUrl']}
         if data.get('imageUrl'):
             image: Dict[str, Any] = {'url': data['imageUrl']}
             if data.get('imageWidth'):
@@ -343,8 +376,8 @@ class Embed:
         text: :class:`str`
             The footer text. Can only be up to 2048 characters.
         icon_url: :class:`str`
-            The URL of the footer icon. Only HTTP(S) is supported.
-            Inline attachment URLs are also supported. Bisim does not show it.
+            The URL of the footer icon, shown small and round before the
+            text. Only HTTP(S) is supported.
         """
         self._footer = {}
         if text is not None:
@@ -386,10 +419,7 @@ class Embed:
         This function returns the class instance to allow for fluent-style
         chaining.
 
-        .. note::
-
-            Bisim does not show images in embeds a bot sends, so the image is
-            kept on this object but is not sent.
+        The image is shown large, below the fields.
 
         Parameters
         -----------
@@ -427,10 +457,7 @@ class Embed:
         This function returns the class instance to allow for fluent-style
         chaining.
 
-        .. note::
-
-            Bisim does not show thumbnails in embeds a bot sends, so the
-            thumbnail is kept on this object but is not sent.
+        The thumbnail is shown small, beside the text.
 
         Parameters
         -----------
@@ -494,8 +521,8 @@ class Embed:
         url: :class:`str`
             The URL for the author.
         icon_url: :class:`str`
-            The URL of the author icon. Only HTTP(S) is supported. Bisim does
-            not show it.
+            The URL of the author icon, shown small and round before the
+            name. Only HTTP(S) is supported.
         """
         self._author = {'name': str(name)}
         if url is not None:
@@ -670,7 +697,8 @@ class Embed:
 
     def _to_bisim(self) -> Dict[str, Any]:
         """The nested shape a Bisim bot sends: title, description, url, color,
-        timestamp, author {name, url}, footer {text} and fields."""
+        timestamp, author {name, url, iconUrl}, footer {text, iconUrl}, fields,
+        image {url} and thumbnail {url}."""
         payload: Dict[str, Any] = {}
         if self.title:
             payload['title'] = self.title[:256]
@@ -689,12 +717,23 @@ class Embed:
             payload['author'] = {'name': author['name']}
             if author.get('url'):
                 payload['author']['url'] = author['url']
+            icon = _picture_url(author.get('icon_url'))
+            if icon:
+                payload['author']['iconUrl'] = icon
         footer = getattr(self, '_footer', None)
         if footer and footer.get('text'):
             payload['footer'] = {'text': footer['text']}
+            icon = _picture_url(footer.get('icon_url'))
+            if icon:
+                payload['footer']['iconUrl'] = icon
         fields = getattr(self, '_fields', None)
         if fields:
             payload['fields'] = [
                 {'name': f['name'], 'value': f['value'], 'inline': bool(f.get('inline', False))} for f in fields[:25]
             ]
+        for attr in ('image', 'thumbnail'):
+            media = getattr(self, '_' + attr, None)
+            url = _picture_url(media.get('url') if isinstance(media, dict) else None)
+            if url:
+                payload[attr] = {'url': url}
         return payload

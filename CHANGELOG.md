@@ -2,6 +2,16 @@
 
 All notable changes to bisim.py are listed here.
 
+## Unreleased
+
+- Embeds show their pictures: `set_image()`, `set_thumbnail()` and the `icon_url`
+  of `set_author()` and `set_footer()` are sent instead of being kept on the
+  `Embed`, and an embed Bisim sends back has its thumbnail and its author and
+  footer `icon_url` filled in. A picture must be an `http` or `https` link;
+  discord.py's `attachment://` is left out with a warning once, since Bisim would
+  refuse the whole message for it. Needs the Bisim server of 2026-11-15 or later;
+  an older one ignores the pictures.
+
 ## 0.2.0 (unreleased)
 
 Voice: a bot joins voice channels, plays sound and hears what is said, with

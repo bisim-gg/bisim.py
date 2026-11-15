@@ -41,9 +41,10 @@ channel per server and does not join DM calls. See [Voice](topics/voice.md).
 
 ## Why is my embed's image missing?
 
-Bisim does not show images, thumbnails or icons in embeds a bot sends. The title, description, link, colour,
-timestamp, author, footer text and fields are shown. Send an image as a file with `bisim.File` instead. See
-[Embeds](topics/embeds.md).
+Bisim shows an embed's image, thumbnail and author and footer icons when each is an `http` or `https` link.
+An `attachment://` picture is left out (bisim.py logs a warning once): send the file with `bisim.File`, or use
+a public link. A link that does not answer, or answers with something that is not a picture, is simply not
+shown. See [Embeds](topics/embeds.md).
 
 ## How do I keep my token safe?
 

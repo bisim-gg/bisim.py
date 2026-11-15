@@ -97,9 +97,9 @@ a warning, and the [event reference](../reference/events.md) lists the events th
 
 ## Things that work a little differently
 
-- **Embeds.** Bisim shows the title, description, link, colour, timestamp, author name and link, footer text
-  and up to 25 fields. `set_image()`, `set_thumbnail()` and icon URLs are kept on the `Embed` but not shown.
-  See [Embeds](topics/embeds.md).
+- **Embed pictures.** The image, the thumbnail and the author and footer icons must be `http` or `https`
+  links. An `attachment://` picture is left out of the message, with a warning once. See
+  [Embeds](topics/embeds.md).
 - **Message length.** Up to 4000 characters, where Discord allows 2000.
 - **Files.** `bisim.File` works with `send()`, uploaded through Bisim's upload addresses. Up to 10 files of
   10 MiB each by default.

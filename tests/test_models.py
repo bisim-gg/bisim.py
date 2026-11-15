@@ -309,3 +309,78 @@ def test_raw_events_from_state(state, guild, dispatched):
     state.parse_guild_member_remove({'type': 'GUILD_MEMBER_REMOVE', 'guildId': p.GUILD_ID, 'guildMemberRemove': {'userId': p.BOT_ID}})
     assert events(dispatched, 'guild_remove')[0][0] is guild
     assert state._get_guild(int(p.GUILD_ID)) is None
+
+
+PICTURES = {
+    'author': 'https://example.com/author.png',
+    'footer': 'http://example.com/footer.png',
+    'image': 'https://example.com/banner.png',
+    'thumbnail': 'https://example.com/thumb.png',
+}
+
+
+def test_embed_sends_its_pictures():
+    embed = (
+        bisim.Embed(title='Pictures')
+        .set_author(name='Sara', url='https://example.com/sara', icon_url=PICTURES['author'])
+        .set_footer(text='Bisim', icon_url=PICTURES['footer'])
+        .set_image(url=PICTURES['image'])
+        .set_thumbnail(url=PICTURES['thumbnail'])
+    )
+    assert embed._to_bisim() == {
+        'title': 'Pictures',
+        'author': {'name': 'Sara', 'url': 'https://example.com/sara', 'iconUrl': PICTURES['author']},
+        'footer': {'text': 'Bisim', 'iconUrl': PICTURES['footer']},
+        'image': {'url': PICTURES['image']},
+        'thumbnail': {'url': PICTURES['thumbnail']},
+    }
+
+
+def test_embed_leaves_out_a_picture_that_is_not_a_web_link(caplog, monkeypatch):
+    monkeypatch.setattr(bisim.embeds, '_warned_picture', False)
+    embed = (
+        bisim.Embed(title='Chart')
+        .set_image(url='attachment://chart.png')
+        .set_thumbnail(url='https://example.com/' + 'x' * 2048)
+        .set_footer(text='Footer', icon_url='data:image/png;base64,AAAA')
+    )
+    with caplog.at_level('WARNING', logger='bisim.embeds'):
+        assert embed._to_bisim() == {'title': 'Chart', 'footer': {'text': 'Footer'}}
+        embed._to_bisim()
+    assert embed.image.url == 'attachment://chart.png'
+    assert len([r for r in caplog.records if 'not shown on Bisim' in r.getMessage()]) == 1
+
+
+def test_embed_reads_the_pictures_bisim_sends_back():
+    embed = bisim.Embed.from_dict(
+        {
+            'type': 'rich',
+            'title': 'Back',
+            'authorName': 'Bot',
+            'authorIconUrl': PICTURES['author'],
+            'footerText': 'Footer',
+            'footerIconUrl': PICTURES['footer'],
+            'imageUrl': PICTURES['image'],
+            'thumbnailUrl': PICTURES['thumbnail'],
+            'fields': [],
+        }
+    )
+    assert embed.image.url == PICTURES['image']
+    assert embed.thumbnail.url == PICTURES['thumbnail'] and embed.thumbnail.proxy_url == PICTURES['thumbnail']
+    assert embed.author.icon_url == PICTURES['author']
+    assert embed.footer.icon_url == PICTURES['footer']
+    assert embed.copy()._to_bisim() == {
+        'title': 'Back',
+        'author': {'name': 'Bot', 'iconUrl': PICTURES['author']},
+        'footer': {'text': 'Footer', 'iconUrl': PICTURES['footer']},
+        'image': {'url': PICTURES['image']},
+        'thumbnail': {'url': PICTURES['thumbnail']},
+    }
+
+
+async def test_send_carries_embed_pictures(guild, http):
+    channel = guild.get_channel(int(p.TEXT_ID))
+    http.respond('POST', f'/channels/{p.TEXT_ID}/messages', lambda route, kwargs: p.message(id='60000000000000998', type='DEFAULT'))
+    await channel.send(embed=bisim.Embed(title='T').set_image(url=PICTURES['image']).set_thumbnail(url=PICTURES['thumbnail']))
+    body = http.last('POST', f'/channels/{p.TEXT_ID}/messages')['json']
+    assert body['embeds'] == [{'title': 'T', 'image': {'url': PICTURES['image']}, 'thumbnail': {'url': PICTURES['thumbnail']}}]

@@ -36,9 +36,11 @@ Every `set_` and `add_` method returns the embed, so calls can be chained:
 | Link on the title | `url=` | |
 | Colour of the edge | `colour=` (or `color=`): a `bisim.Colour` or an `int` such as `0x5197ED` | |
 | Time at the bottom | `timestamp=`: a timezone aware `datetime` | |
-| Author | `set_author(name=..., url=...)` | 256 characters |
-| Footer | `set_footer(text=...)` | 2048 characters |
+| Author | `set_author(name=..., url=..., icon_url=...)` | 256 characters |
+| Footer | `set_footer(text=..., icon_url=...)` | 2048 characters |
 | Fields | `add_field(name=..., value=..., inline=True)` | 25 fields; 256 for a name, 1024 for a value |
+| Thumbnail, beside the text | `set_thumbnail(url=...)` | 2048 characters |
+| Large image, below the fields | `set_image(url=...)` | 2048 characters |
 
 All the text of one embed together must stay within 6000 characters; `len(embed)` tells you how much it has.
 A message can carry up to 10 embeds: pass a list as `embeds=`.
@@ -46,12 +48,12 @@ A message can carry up to 10 embeds: pass a list as `embeds=`.
 `bisim.Colour` has the usual presets (`Colour.red()`, `Colour.blurple()`, `Colour.dark_theme()` and more) and
 `Colour.from_rgb(r, g, b)`.
 
-!!! note "What Bisim shows"
+!!! note "Pictures"
 
-    Bisim shows the title, description, link, colour, timestamp, author name and link, footer text and
-    fields. `set_image()`, `set_thumbnail()` and the `icon_url` of the author and footer are accepted and kept
-    on the `Embed` object, so code written for discord.py keeps working, but they are not sent and Bisim
-    does not show them.
+    A picture (the image, the thumbnail and the author and footer icons) is an `http` or `https` link, and
+    every reader's app loads it from that address, as Discord's did. discord.py's `attachment://name.png` is
+    not supported yet: bisim.py leaves such a picture out of the message and logs a warning once. To show a
+    file you made, send it with `bisim.File`, or put it somewhere with a public link first.
 
 ## Sending embeds
 
