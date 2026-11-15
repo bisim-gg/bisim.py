@@ -386,6 +386,22 @@ async def test_automod_rule_events(client, fake):
     assert not rule.enabled and rule.actions == []
 
 
+async def test_automod_profile_rule_reads_as_member_profile(client, fake):
+    rule = {'id': '60000000000000953', 'guildId': p.GUILD_ID, 'name': 'Names', 'eventType': 'MEMBER_UPDATE',
+            'triggerType': 'KEYWORD', 'keywords': ['admin'], 'enabled': True}
+    await fake.send(p.envelope('AUTO_MODERATION_RULE_CREATE', guildId=p.GUILD_ID, automodRule=rule))
+    await client.wait_event('automod_rule_create')
+    (made,) = client.events('automod_rule_create')[-1]
+    assert made.event_type is bisim.AutoModRuleEventType.member_update
+    assert made.trigger.type is bisim.AutoModRuleTriggerType.member_profile
+    assert made.trigger.keyword_filter == ['admin']
+    action = {'guildId': p.GUILD_ID, 'actionType': 1, 'ruleId': rule['id'], 'ruleTriggerType': 'KEYWORD', 'userId': p.OWNER_ID, 'matchedKeyword': 'admin'}
+    await fake.send(p.envelope('AUTO_MODERATION_ACTION_EXECUTION', guildId=p.GUILD_ID, automodAction=action))
+    await client.wait_event('automod_action')
+    (execution,) = client.events('automod_action')[-1]
+    assert execution.rule_trigger_type is bisim.AutoModRuleTriggerType.member_profile
+
+
 async def test_automod_action(client, fake):
     guild = client.get_guild(int(p.GUILD_ID))
     actions = [

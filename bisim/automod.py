@@ -249,7 +249,10 @@ class AutoModTrigger:
     @classmethod
     def _from_rule(cls, data: Dict[str, Any]) -> Self:
         type_ = AutoModRuleTriggerType.from_bisim(data.get('triggerType'))
-        if type_ is AutoModRuleTriggerType.keyword:
+        # Bisim stores a profile rule as a KEYWORD rule on MEMBER_UPDATE; Discord calls it member_profile (6).
+        if type_ is AutoModRuleTriggerType.keyword and str(data.get('eventType') or '').upper() == 'MEMBER_UPDATE':
+            type_ = AutoModRuleTriggerType.member_profile
+        if type_ in (AutoModRuleTriggerType.keyword, AutoModRuleTriggerType.member_profile):
             return cls(
                 type=type_,
                 keyword_filter=list(data.get('keywords') or []),
@@ -567,6 +570,9 @@ class AutoModAction:
         self.action: AutoModRuleAction = AutoModRuleAction._from_execution(data)
         self.rule_id: int = int(data['ruleId'])
         self.rule_trigger_type: AutoModRuleTriggerType = AutoModRuleTriggerType.from_bisim(data.get('ruleTriggerType'))
+        # A keyword match with no channel is a profile rule's (Discord's member_profile, 6).
+        if self.rule_trigger_type is AutoModRuleTriggerType.keyword and not data.get('channelId'):
+            self.rule_trigger_type = AutoModRuleTriggerType.member_profile
         self.guild_id: int = int(data['guildId'])
         self.channel_id: Optional[int] = utils._snowflake(data.get('channelId'))
         self.user_id: int = int(data['userId'])
