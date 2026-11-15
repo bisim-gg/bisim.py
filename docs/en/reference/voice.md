@@ -28,6 +28,10 @@ Every source produces 16-bit 48 kHz stereo PCM in 20 ms frames. The ffmpeg sourc
 
 ::: bisim.SoundboardSound
 
+::: bisim.VoiceChannelEffect
+
+::: bisim.VoiceChannelSoundEffect
+
 ## Opus
 
 There is no Opus to load on Bisim. These are kept so discord.py code that calls them runs unchanged.

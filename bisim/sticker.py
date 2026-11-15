@@ -205,12 +205,63 @@ class GuildSticker(Sticker):
         """Optional[:class:`Guild`]: The guild that this sticker is from."""
         return self._state._get_guild(self.guild_id)
 
-    async def edit(self, **kwargs: Any) -> GuildSticker:
+    async def edit(
+        self,
+        *,
+        name: str = utils.MISSING,
+        description: str = utils.MISSING,
+        emoji: str = utils.MISSING,
+        reason: Optional[str] = None,
+    ) -> GuildSticker:
         """|coro|
 
-        Not supported on Bisim: delete the sticker and upload it again.
+        Edits a :class:`GuildSticker` for the guild.
+
+        You must have :attr:`~Permissions.manage_expressions` to do this, or
+        :attr:`~Permissions.create_expressions` for a sticker the bot made.
+
+        Parameters
+        -----------
+        name: :class:`str`
+            The sticker's new name, 2 to 30 characters.
+        description: :class:`str`
+            Not supported on Bisim (stickers have no description).
+        emoji: :class:`str`
+            Not supported on Bisim (stickers have no related emoji).
+        reason: :class:`str`
+            The reason for editing this sticker. Shows up on the audit log.
+
+        Raises
+        -------
+        Forbidden
+            You are not allowed to edit stickers.
+        HTTPException
+            An error occurred editing the sticker.
+        NotSupported
+            ``description`` or ``emoji`` was given.
+
+        Returns
+        --------
+        :class:`GuildSticker`
+            The newly modified sticker.
         """
-        raise NotSupported('Editing a sticker')
+        if description is not utils.MISSING:
+            raise NotSupported('Sticker descriptions')
+        if emoji is not utils.MISSING:
+            raise NotSupported("A sticker's related emoji")
+        payload: Dict[str, Any] = {}
+        if name is not utils.MISSING:
+            payload['name'] = name
+        if not payload:
+            return self
+        data = await self._state.http.modify_guild_sticker(self.guild_id, self.id, payload, reason=reason)
+        data = dict(data)
+        data.setdefault('guildId', str(self.guild_id))
+        sticker = GuildSticker(state=self._state, data=data)
+        stickers = getattr(self._state, '_stickers', None)
+        if isinstance(stickers, dict):
+            stickers[sticker.id] = sticker
+        return sticker
 
     async def delete(self, *, reason: Optional[str] = None) -> None:
         """|coro|

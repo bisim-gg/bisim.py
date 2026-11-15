@@ -30,7 +30,8 @@ pip install "bisim.py[http]"
 import bisim
 from bisim import app_commands
 
-intents = bisim.Intents.default()  # accepted for compatibility; Bisim has no intents
+intents = bisim.Intents.default()
+intents.message_content = True  # to read '!hello' (switch it on at bisim.gg/developers)
 client = bisim.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
@@ -55,7 +56,8 @@ async def on_message(message: bisim.Message):
 client.run('your bot token')
 ```
 
-Create an application and copy its token in Bisim: Settings, Applications.
+Create an application and copy its token in Bisim's Developer Portal: Settings,
+Developer Portal, or [bisim.gg/developers](https://bisim.gg/developers).
 More examples are in [`examples/`](examples/): slash commands and context menus,
 buttons with a select menu and a modal, and a prefix command bot with a cog and a
 background task.

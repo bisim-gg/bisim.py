@@ -51,9 +51,19 @@ A message can carry up to 10 embeds: pass a list as `embeds=`.
 !!! note "Pictures"
 
     A picture (the image, the thumbnail and the author and footer icons) is an `http` or `https` link, and
-    every reader's app loads it from that address, as Discord's did. discord.py's `attachment://name.png` is
-    not supported yet: bisim.py leaves such a picture out of the message and logs a warning once. To show a
-    file you made, send it with `bisim.File`, or put it somewhere with a public link first.
+    every reader's app loads it from that address, as Discord's did. To show a file you made, send it with the
+    message and name it with `attachment://`, as in discord.py:
+
+    ```python
+    file = bisim.File('chart.png')
+    embed = bisim.Embed(title='Sales').set_image(url='attachment://chart.png')
+    await channel.send(file=file, embed=embed)
+    ```
+
+    This works wherever a message carries files: `send()`, interaction answers and followups, webhooks, and
+    edits (a file the message keeps counts too). An `attachment://` picture that names no file of the message
+    is left out, with a warning once, since Bisim would refuse the whole message for it. Bisim keeps the file
+    in `message.attachments` (Discord leaves out a file an embed shows); Bisim's apps hide it.
 
 ## Sending embeds
 

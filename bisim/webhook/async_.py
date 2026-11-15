@@ -165,9 +165,8 @@ class PartialWebhookGuild(Hashable):
 class WebhookMessage(Message):
     """Represents a message sent from your webhook.
 
-    This allows you to edit or delete a message sent by your webhook (for
-    an interaction's followups; Bisim cannot edit a plain webhook's message
-    through its token).
+    This allows you to edit or delete a message sent by your webhook, or by
+    an interaction's followups.
 
     This inherits from :class:`bisim.Message` with changes to
     :meth:`edit` and :meth:`delete` to work.
@@ -200,12 +199,18 @@ class WebhookMessage(Message):
             The embed to edit the message with. ``None`` suppresses the embeds.
             This should not be mixed with the ``embeds`` parameter.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
-            the view is removed.
+            the view is removed. Only an interaction's followups carry a view.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
 
         Raises
         -------
@@ -215,15 +220,21 @@ class WebhookMessage(Message):
             Edited a message that is not yours.
         TypeError
             You specified both ``embed`` and ``embeds``
-        NotSupported
-            The message was sent by a plain webhook.
 
         Returns
         --------
         :class:`WebhookMessage`
             The newly edited message.
         """
-        return await self._webhook.edit_message(
+        extra: Dict[str, Any] = {}
+        suppress = kwargs.pop('suppress', utils.MISSING)
+        if suppress is not utils.MISSING:
+            # Message.edit's spelling, for a webhook's own message.
+            extra['suppress_embeds'] = suppress
+        delete_after = kwargs.pop('delete_after', None)
+        if kwargs:
+            raise TypeError(f'edit() got an unexpected keyword argument {next(iter(kwargs))!r}')
+        message = await self._webhook.edit_message(
             self.id,
             content=content,
             embeds=embeds,
@@ -231,7 +242,11 @@ class WebhookMessage(Message):
             attachments=attachments,
             view=view,
             allowed_mentions=allowed_mentions,
+            **extra,
         )
+        if delete_after is not None:
+            await self.delete(delay=delete_after)
+        return message
 
     async def delete(self, *, delay: Optional[float] = None) -> None:
         """|coro|
@@ -648,7 +663,9 @@ class Webhook(BaseWebhook):
         name: Optional[:class:`str`]
             The webhook's new default name.
         avatar: Optional[:class:`bytes`]
-            Not supported on Bisim.
+            A :term:`py:bytes-like object` representing the webhook's new default avatar,
+            or ``None`` to remove it. Messages the webhook posts afterwards show it;
+            what it already posted keeps the picture it had.
         channel: Optional[:class:`abc.Snowflake`]
             The webhook's new channel.
         reason: Optional[:class:`str`]
@@ -662,23 +679,28 @@ class Webhook(BaseWebhook):
             This webhook does not exist.
         ValueError
             This webhook does not have a bot token.
-        NotSupported
-            An avatar was given.
 
         Returns
         --------
         :class:`Webhook`
             The newly edited webhook.
         """
-        if avatar is not utils.MISSING:
-            raise NotSupported('Webhook avatars')
         self._authenticated()
         fields: Dict[str, Any] = {}
         if name is not utils.MISSING:
             fields['name'] = str(name) if name is not None else None
         if channel is not None:
             fields['channelId'] = str(channel.id)
-        data = await self._http.edit_webhook(self.id, reason=reason, **fields)
+        data: Any = None
+        if fields:
+            data = await self._http.edit_webhook(self.id, reason=reason, **fields)
+        if avatar is not utils.MISSING:
+            if avatar is None:
+                data = await self._http.delete_webhook_avatar(self.id, reason=reason)
+            else:
+                data = await self._http.edit_webhook_avatar(
+                    self.id, bytes(avatar), utils._get_mime_type_for_image(bytes(avatar)), reason=reason
+                )
         if isinstance(data, dict) and data.get('id'):
             self._update(data)
         return self
@@ -695,6 +717,15 @@ class Webhook(BaseWebhook):
         message = WebhookMessage(state=state, channel=channel, data=data)  # type: ignore
         message._webhook = self
         return message
+
+    def _need_token(self) -> str:
+        if self.token is None:
+            raise ValueError('This webhook does not have a token associated with it')
+        return self.token
+
+    async def _create_uploads(self, files: List[Dict[str, Any]]) -> Any:
+        """Upload addresses for the webhook's message files, asked for with its token."""
+        return await self._http.create_webhook_attachments(self.id, self._need_token(), files)
 
     async def send(
         self,
@@ -724,10 +755,12 @@ class Webhook(BaseWebhook):
 
         The content must be a type that can convert to a string through ``str(content)``.
 
-        To upload a single embed, the ``embed`` parameter should be used with a
-        single :class:`Embed` object. To upload multiple embeds, the ``embeds``
-        parameter should be used with a :class:`list` of :class:`Embed` objects.
-        **Specifying both parameters will lead to an exception**.
+        To upload a single file, the ``file`` parameter should be used with a
+        single :class:`File` object.
+
+        If the ``embed`` parameter is provided, it must be of type :class:`Embed` and
+        it must be a rich embed type. You cannot mix the ``embed`` parameter with the
+        ``embeds`` parameter, which must be a :class:`list` of :class:`Embed` objects to send.
 
         Parameters
         ------------
@@ -742,9 +775,14 @@ class Webhook(BaseWebhook):
             then the default username for the webhook is used.
         avatar_url: :class:`str`
             Accepted for compatibility. Bisim never shows an outside picture on a
-            webhook's message.
+            webhook's message; give the webhook its own picture with :meth:`edit`.
         tts: :class:`bool`
             Accepted for compatibility.
+        file: :class:`File`
+            The file to upload. This cannot be mixed with ``files`` parameter.
+        files: List[:class:`File`]
+            A list of files to send with the content. This cannot be mixed with the
+            ``file`` parameter.
         embed: :class:`Embed`
             The rich embed for the content to send. This cannot be mixed with
             ``embeds`` parameter.
@@ -752,11 +790,12 @@ class Webhook(BaseWebhook):
             A list of embeds to send with the content. Maximum of 10. This cannot
             be mixed with the ``embed`` parameter.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
-        file: :class:`File`
-            Not supported on Bisim webhooks.
-        files: List[:class:`File`]
-            Not supported on Bisim webhooks.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
+        suppress_embeds: :class:`bool`
+            Whether to suppress embeds for the message.
+        silent: :class:`bool`
+            Whether to suppress push and desktop notifications for the message.
         view: :class:`bisim.ui.View`
             Not supported on Bisim webhooks.
         thread: :class:`~bisim.abc.Snowflake`
@@ -773,22 +812,19 @@ class Webhook(BaseWebhook):
         Forbidden
             The authorization token for the webhook is incorrect.
         TypeError
-            You specified both ``embed`` and ``embeds``.
+            You specified both ``embed`` and ``embeds`` or ``file`` and ``files``.
         ValueError
             The length of ``embeds`` was invalid, or there was no token
             associated with this webhook.
         NotSupported
-            Files, views, threads or polls were given.
+            A view, a thread or a poll was given.
 
         Returns
         ---------
         Optional[:class:`WebhookMessage`]
             If ``wait`` is ``True`` then the message that was sent, otherwise ``None``.
         """
-        if self.token is None:
-            raise ValueError('This webhook does not have a token associated with it')
-        if file is not utils.MISSING or files is not utils.MISSING:
-            raise NotSupported('Sending files through a webhook')
+        token = self._need_token()
         if view is not utils.MISSING and view is not None:
             raise NotSupported('Components on webhook messages')
         if thread is not utils.MISSING or thread_name is not utils.MISSING or applied_tags is not utils.MISSING:
@@ -798,20 +834,26 @@ class Webhook(BaseWebhook):
         if ephemeral:
             raise NotSupported('Ephemeral messages from a plain webhook')
 
-        from ..abc import _embeds_payload
+        from ..abc import _message_payload
 
-        payload: Dict[str, Any] = {}
-        if content is not utils.MISSING and content is not None:
-            payload['content'] = str(content)
-        built = _embeds_payload(
-            embed if embed is not utils.MISSING else None, embeds if embeds is not utils.MISSING else None
+        payload = await _message_payload(
+            self._state,
+            None,
+            content=content if content is not None else utils.MISSING,
+            embed=embed if embed is not None else utils.MISSING,
+            embeds=embeds if embeds is not None else utils.MISSING,
+            file=file,
+            files=files,
+            silent=silent,
+            suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
+            create_uploads=self._create_uploads,
         )
-        if built:
-            payload['embeds'] = built
+        payload.pop('nonce', None)
         if username is not utils.MISSING and username:
             payload['username'] = username
 
-        data = await self._http.execute_webhook(self.id, self.token, payload, wait=wait)
+        data = await self._http.execute_webhook(self.id, token, payload, wait=wait)
         if wait and isinstance(data, dict):
             return self._create_message(data)
         return None
@@ -819,20 +861,149 @@ class Webhook(BaseWebhook):
     async def fetch_message(self, id: int, /, *, thread: Snowflake = utils.MISSING) -> WebhookMessage:
         """|coro|
 
-        Not supported on Bisim: a webhook cannot read its past messages through its token.
-        """
-        raise NotSupported("Reading a webhook's message through its token")
+        Retrieves a single :class:`~bisim.WebhookMessage` owned by this webhook.
 
-    async def edit_message(self, message_id: int, **kwargs: Any) -> WebhookMessage:
+        Parameters
+        ------------
+        id: :class:`int`
+            The message ID to look for.
+        thread: :class:`~bisim.abc.Snowflake`
+            Not supported on Bisim (no threads).
+
+        Raises
+        --------
+        ~bisim.NotFound
+            The specified message was not found, or this webhook did not post it.
+        ~bisim.Forbidden
+            You do not have the permissions required to get a message.
+        ~bisim.HTTPException
+            Retrieving the message failed.
+        ValueError
+            There was no token associated with this webhook.
+
+        Returns
+        --------
+        :class:`~bisim.WebhookMessage`
+            The message asked for.
+        """
+        if thread is not utils.MISSING:
+            raise NotSupported('Threads')
+        data = await self._http.get_webhook_message(self.id, self._need_token(), id)
+        return self._create_message(data)
+
+    async def edit_message(
+        self,
+        message_id: int,
+        *,
+        content: Optional[str] = utils.MISSING,
+        embeds: Sequence[Embed] = utils.MISSING,
+        embed: Optional[Embed] = utils.MISSING,
+        attachments: Sequence[Any] = utils.MISSING,
+        view: Any = utils.MISSING,
+        allowed_mentions: Optional[AllowedMentions] = None,
+        thread: Snowflake = utils.MISSING,
+        suppress_embeds: bool = utils.MISSING,
+    ) -> WebhookMessage:
         """|coro|
 
-        Not supported on Bisim: a webhook cannot edit its past messages through its token.
+        Edits a message owned by this webhook.
+
+        This is a lower level interface to :meth:`WebhookMessage.edit` in case
+        you only have an ID.
+
+        Parameters
+        ------------
+        message_id: :class:`int`
+            The message ID to edit.
+        content: Optional[:class:`str`]
+            The content to edit the message with or ``None`` to clear it.
+        embeds: List[:class:`Embed`]
+            A list of embeds to edit the message with.
+        embed: Optional[:class:`Embed`]
+            The embed to edit the message with. ``None`` suppresses the embeds.
+            This should not be mixed with the ``embeds`` parameter.
+        attachments: List[Union[:class:`Attachment`, :class:`File`]]
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
+        allowed_mentions: :class:`AllowedMentions`
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
+        view: Optional[:class:`~bisim.ui.View`]
+            Not supported on Bisim webhooks.
+        thread: :class:`~bisim.abc.Snowflake`
+            Not supported on Bisim (no threads).
+        suppress_embeds: :class:`bool`
+            Whether to suppress embeds for the message (``False`` brings them
+            back). This is a Bisim addition.
+
+        Raises
+        -------
+        HTTPException
+            Editing the message failed.
+        Forbidden
+            Edited a message that is not yours.
+        TypeError
+            You specified both ``embed`` and ``embeds``
+        ValueError
+            The length of ``embeds`` was invalid,
+            or there was no token associated with this webhook.
+
+        Returns
+        --------
+        :class:`WebhookMessage`
+            The newly edited webhook message.
         """
-        raise NotSupported("Editing a webhook's message through its token")
+        if view is not utils.MISSING and view is not None:
+            raise NotSupported('Components on webhook messages')
+        if thread is not utils.MISSING:
+            raise NotSupported('Threads')
+        token = self._need_token()
+
+        from ..abc import _message_payload
+
+        payload = await _message_payload(
+            self._state,
+            None,
+            content=content,
+            embed=embed,
+            embeds=embeds,
+            attachments=attachments,
+            suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
+            editing=True,
+            create_uploads=self._create_uploads,
+        )
+        data = await self._http.edit_webhook_message(self.id, token, message_id, payload)
+        return self._create_message(data)
 
     async def delete_message(self, message_id: int, /, *, thread: Snowflake = utils.MISSING) -> None:
         """|coro|
 
-        Not supported on Bisim: a webhook cannot delete its past messages through its token.
+        Deletes a message owned by this webhook.
+
+        This is a lower level interface to :meth:`WebhookMessage.delete` in case
+        you only have an ID.
+
+        Parameters
+        ------------
+        message_id: :class:`int`
+            The message ID to delete.
+        thread: :class:`~bisim.abc.Snowflake`
+            Not supported on Bisim (no threads).
+
+        Raises
+        -------
+        HTTPException
+            Deleting the message failed.
+        Forbidden
+            Deleted a message that is not yours.
+        ValueError
+            There was no token associated with this webhook.
         """
-        raise NotSupported("Deleting a webhook's message through its token")
+        if thread is not utils.MISSING:
+            raise NotSupported('Threads')
+        await self._http.delete_webhook_message(self.id, self._need_token(), message_id)

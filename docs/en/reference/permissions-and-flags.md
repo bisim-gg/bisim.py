@@ -8,7 +8,7 @@ Permissions use Discord's bit numbers, so a permission value from a discord.py b
 
 ## Intents
 
-Intents are accepted wherever discord.py takes them and change nothing: a Bisim bot receives every event its permissions let it see.
+Intents say which gateway events a bot receives, with Discord's bits. The privileged ones (`members`, `presences`, `message_content`) must also be switched on for the bot at [bisim.gg/developers](https://bisim.gg/developers); see the guide's [Intents](../guide/topics/events.md#intents) section.
 
 ::: bisim.Intents
     options:
@@ -61,5 +61,9 @@ Intents are accepted wherever discord.py takes them and change nothing: a Bisim 
       heading_level: 3
 
 ::: bisim.AppInstallationType
+    options:
+      heading_level: 3
+
+::: bisim.AutoModPresets
     options:
       heading_level: 3

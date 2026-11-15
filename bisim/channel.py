@@ -52,12 +52,112 @@ __all__ = (
     'Thread',
     'ThreadMember',
     'MediaChannel',
+    'VoiceChannelEffect',
+    'VoiceChannelSoundEffect',
 )
+
+
+class VoiceChannelSoundEffect(Hashable):
+    """Represents a sound someone played in a voice channel (the sound of a
+    :class:`VoiceChannelEffect`).
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two sound effects are equal.
+
+        .. describe:: x != y
+
+            Checks if two sound effects are not equal.
+
+        .. describe:: hash(x)
+
+            Returns the sound effect's hash.
+
+    Attributes
+    ------------
+    id: :class:`int`
+        The ID of the sound.
+    volume: :class:`float`
+        The volume of the sound as floating point percentage (e.g. ``1.0`` for 100%).
+    """
+
+    __slots__ = ('_state', 'id', 'volume')
+
+    def __init__(self, *, state: ConnectionState, id: int, volume: float) -> None:
+        self._state: ConnectionState = state
+        self.id: int = id
+        self.volume: float = volume
+
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} id={self.id} volume={self.volume}>'
+
+    @property
+    def created_at(self) -> Optional[datetime.datetime]:
+        """Optional[:class:`datetime.datetime`]: Returns the snowflake's creation time in UTC."""
+        return utils.snowflake_time(self.id)
+
+    def is_default(self) -> bool:
+        """:class:`bool`: Always ``False``: every Bisim sound belongs to a server."""
+        return False
+
+
+class VoiceChannelEffect:
+    """Represents an effect someone sent in a voice channel: on Bisim, a
+    soundboard sound pressed in the call (:func:`on_voice_channel_effect`).
+
+    Attributes
+    ------------
+    channel: :class:`VoiceChannel`
+        The channel in which the effect is sent.
+    user: Optional[:class:`Member`]
+        The user who sent the effect. ``None`` if not found in cache.
+    animation: ``None``
+        Always ``None``: Bisim has no effect animations.
+    emoji: Optional[:class:`PartialEmoji`]
+        The emoji on the sound's button, if it has one.
+    sound: Optional[:class:`VoiceChannelSoundEffect`]
+        The sound of the effect.
+    """
+
+    __slots__ = ('channel', 'user', 'animation', 'emoji', 'sound')
+
+    def __init__(self, *, state: ConnectionState, data: Dict[str, Any], guild: Guild) -> None:
+        from .partial_emoji import PartialEmoji
+
+        self.channel: VoiceChannel = guild.get_channel(int(data['channelId']))  # type: ignore
+        user_id = utils._snowflake(data.get('userId'))
+        self.user: Optional[Member] = guild.get_member(user_id) if user_id is not None else None
+        self.animation: Optional[Any] = None
+        sound = data.get('sound') or {}
+        emoji = sound.get('emojiName')
+        self.emoji: Optional[Any] = PartialEmoji(name=emoji) if emoji else None
+        self.sound: Optional[VoiceChannelSoundEffect] = None
+        sound_id = utils._snowflake(sound.get('id'))
+        if sound_id is not None:
+            volume = max(0, min(100, utils._int(sound.get('volume'), 100))) / 100.0
+            self.sound = VoiceChannelSoundEffect(state=state, id=sound_id, volume=volume)
+
+    def __repr__(self) -> str:
+        attrs = [
+            ('channel', self.channel),
+            ('user', self.user),
+            ('animation', self.animation),
+            ('emoji', self.emoji),
+            ('sound', self.sound),
+        ]
+        inner = ' '.join('%s=%r' % t for t in attrs)
+        return f'<{self.__class__.__name__} {inner}>'
+
+    def is_sound(self) -> bool:
+        """:class:`bool`: Whether the effect is a sound or not."""
+        return self.sound is not None
 
 
 async def _single_delete_strategy(messages: Iterable[Message], *, reason: Optional[str] = None) -> None:
     for m in messages:
-        await m.delete()
+        await m._state.http.delete_message(m.channel.id, m.id, reason=reason)
 
 
 class TextChannel(abc.Messageable, abc.GuildChannel, Hashable):
@@ -510,7 +610,8 @@ class TextChannel(abc.Messageable, abc.GuildChannel, Hashable):
         name: :class:`str`
             The webhook's name.
         avatar: Optional[:class:`bytes`]
-            Not supported on Bisim.
+            A :term:`py:bytes-like object` representing the webhook's default avatar.
+            This operates similarly to :meth:`~ClientUser.edit`.
         reason: Optional[:class:`str`]
             The reason for creating this webhook. Shows up in the audit logs.
 
@@ -520,8 +621,6 @@ class TextChannel(abc.Messageable, abc.GuildChannel, Hashable):
             Creating the webhook failed.
         Forbidden
             You do not have permissions to create a webhook.
-        NotSupported
-            An avatar was given.
 
         Returns
         --------
@@ -530,9 +629,13 @@ class TextChannel(abc.Messageable, abc.GuildChannel, Hashable):
         """
         from .webhook import Webhook
 
-        if avatar is not None:
-            raise NotSupported('Webhook avatars')
         data = await self._state.http.create_webhook(self.id, name=str(name), reason=reason)
+        if avatar is not None:
+            # Bisim stores the picture through its own route, once the webhook exists.
+            image = bytes(avatar)
+            data = await self._state.http.edit_webhook_avatar(
+                data['id'], image, utils._get_mime_type_for_image(image), reason=reason
+            )
         return Webhook.from_state(data, state=self._state)
 
     async def follow(self, *, destination: TextChannel, reason: Optional[str] = None) -> Webhook:
@@ -852,7 +955,9 @@ class VoiceChannel(abc.Connectable, abc.GuildChannel, Hashable):
         video_quality_mode: :class:`VideoQualityMode`
             Not supported on Bisim.
         status: Optional[:class:`str`]
-            Not supported for bots on Bisim.
+            The new voice channel status, one line of up to 500 characters.
+            Can be ``None`` to remove the status. The bot must be in this
+            voice channel and have :attr:`~Permissions.set_voice_channel_status`.
 
         Raises
         ------

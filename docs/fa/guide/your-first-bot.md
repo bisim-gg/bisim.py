@@ -7,8 +7,9 @@ import os
 
 import bisim
 
-# Accepted for compatibility with discord.py; Bisim has no intents
 intents = bisim.Intents.default()
+# Privileged: switch Message Content on for the bot at bisim.gg/developers first
+intents.message_content = True
 client = bisim.Client(intents=intents)
 
 
@@ -42,8 +43,11 @@ python bot.py
 
 ## چه اتفاقی افتاد
 
-- `bisim.Client` اتصال شما به بی‌سیم است. گزینهٔ `intents` را مثل discord.py می‌گیرد، اما بی‌سیم آن را نادیده
-  می‌گیرد: ربات هر رویدادی را که دسترسی‌هایش اجازه بدهند دریافت می‌کند، از جمله متن همهٔ پیام‌ها.
+- `bisim.Client` اتصال شما به بی‌سیم است. `intents` مثل discord.py می‌گوید ربات کدام رویدادها را می‌خواهد.
+  خواندن متن پیام‌ها در سرورها به اینتنت ویژهٔ `message_content` نیاز دارد: آن را در
+  [bisim.gg/developers](https://bisim.gg/developers) روشن کنید (برنامهٔ شما، **Bot**، **Privileged Gateway
+  Intents**)، وگرنه ربات با خطای `PrivilegedIntentsRequired` وصل نمی‌شود. صفحهٔ
+  [رویدادها](topics/events.md#اینتنتها) همهٔ اینتنت‌ها را توضیح می‌دهد.
 - `@client.event` یک coroutine را به‌عنوان کنترل‌کنندهٔ رویداد ثبت می‌کند. نام تابع مشخص می‌کند کدام رویداد را
   کنترل می‌کند، پس باید دقیقاً درست نوشته شود، مثل `on_message`. صفحهٔ [رویدادها](topics/events.md) بقیه را
   فهرست می‌کند.
@@ -59,8 +63,8 @@ python bot.py
 حافظهٔ خود را خودش پر می‌کند:
 
 1. کاربر ربات و فهرست سرورهایش را از API می‌خواند.
-2. برای هر سرور کانال‌ها، نقش‌ها، اعضا، ایموجی‌های سفارشی، استیکرها و وضعیت‌های صوتی را بارگذاری می‌کند و
-   سپس در رویدادهای آن سرور مشترک می‌شود. برای هر سرور رویداد `on_guild_available` رخ می‌دهد.
+2. برای هر سرور کانال‌ها، نقش‌ها، ایموجی‌های سفارشی، استیکرها و وضعیت‌های صوتی را، و اگر ربات اینتنت
+   `members` را دارد اعضا را هم، بارگذاری می‌کند و سپس در رویدادهای آن سرور مشترک می‌شود. برای هر سرور رویداد `on_guild_available` رخ می‌دهد.
 3. وقتی همهٔ سرورها بارگذاری شدند، `on_ready` را صدا می‌زند. از این لحظه `client.guilds`،
    `client.get_channel()` و بقیهٔ حافظه پر است.
 

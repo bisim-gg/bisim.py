@@ -49,7 +49,10 @@ class MyBot(commands.Bot):
         await self.add_cog(Greetings(self))
 
 
-bot = MyBot(command_prefix='!', intents=bisim.Intents.default())
+intents = bisim.Intents.default()
+intents.members = True  # on_member_join
+intents.message_content = True  # prefix commands
+bot = MyBot(command_prefix='!', intents=intents)
 ```
 
 `bot.get_cog('Greetings')` کاگ را برمی‌گرداند، `bot.cogs` فهرست کاگ‌هاست و `await bot.remove_cog('Greetings')` یک کاگ

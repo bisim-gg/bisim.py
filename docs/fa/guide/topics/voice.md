@@ -153,7 +153,9 @@ await vc.disconnect()
   `timeout` ثانیه).
 
 `on_voice_state_update` پیوستن، جابه‌جا شدن و ترک کردن خود ربات را هم مثل بقیه گزارش می‌کند و `member.voice` و
-`VoiceChannel.members` آن را هم در بر می‌گیرند.
+`VoiceChannel.members` آن را هم در بر می‌گیرند. وضعیت صوتی دیگران به اینتنت `voice_states` نیاز دارد (که در
+`Intents.default()` هست)، و `VoiceChannel.members` فقط اعضای موجود در حافظه را فهرست می‌کند، پس به اینتنت
+`members` هم نیاز دارد؛ `VoiceChannel.voice_states` در هر حال شناسهٔ همه را دارد.
 
 ## دریافت صدا
 
@@ -222,6 +224,29 @@ await vc.channel.send_sound(sounds[0])
 
 ربات باید در همان کانال باشد. همهٔ حاضران کانال صدا را می‌شنوند؛ این صدا از صدای خود ربات نمی‌گذرد، پس روی هر
 چیزی که ربات پخش می‌کند شنیده می‌شود.
+
+وقتی کسی در کانالی که ربات می‌بیند صدایی پخش کند، `on_voice_channel_effect` صدا زده می‌شود، و صداهای تازه،
+تغییرکرده و حذف‌شدهٔ سرور با `on_soundboard_sound_create`، `_update` و `_delete` می‌رسند. بی‌سیم هنگام اتصال
+ربات صداها را نمی‌فرستد: `guild.soundboard_sounds` صداهایی را دارد که کتاب‌خانه دیده است، پس یک بار
+`fetch_soundboard_sounds()` را صدا بزنید تا همه بارگذاری شوند.
+
+```python
+@client.event
+async def on_voice_channel_effect(effect: bisim.VoiceChannelEffect) -> None:
+    if effect.is_sound():
+        sound = effect.channel.guild.get_soundboard_sound(effect.sound.id)
+        print(f'{effect.user} played {sound or effect.sound.id} in {effect.channel}')
+```
+
+## وضعیت کانال { #channel-status }
+
+وقتی ربات در یک کانال صوتی است، مثل دیسکورد می‌تواند خط وضعیت آن کانال را تعیین کند (به دسترسی Set Voice
+Channel Status نیاز دارد):
+
+```python
+await vc.channel.edit(status='Now playing: Lo-fi radio')
+await vc.channel.edit(status=None)  # clears it
+```
 
 ## یک ربات موسیقی کوچک
 

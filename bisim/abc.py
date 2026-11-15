@@ -10,6 +10,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
+    Awaitable,
     Callable,
     Dict,
     Generator,
@@ -202,20 +203,31 @@ class _Overwrites:
 # ---------------------------------------------------------------------------
 
 
-def _embeds_payload(embed: Optional[Embed], embeds: Optional[Sequence[Embed]]) -> Optional[List[Dict[str, Any]]]:
+def _embeds_payload(
+    embed: Optional[Embed], embeds: Optional[Sequence[Embed]], files: Any = utils.MISSING
+) -> Optional[List[Dict[str, Any]]]:
     if embed is not None and embed is not utils.MISSING and embeds is not None and embeds is not utils.MISSING:
         raise TypeError('Cannot mix embed and embeds keyword arguments.')
     if embeds is not None and embeds is not utils.MISSING:
         if len(embeds) > 10:
             raise ValueError('embeds has a maximum of 10 elements.')
-        return [e._to_bisim() for e in embeds]
+        return [e._to_bisim(files) for e in embeds]
     if embed is not None and embed is not utils.MISSING:
-        return [embed._to_bisim()]
+        return [embed._to_bisim(files)]
     return None
 
 
-async def _upload_files(state: ConnectionState, channel_id: int, files: Sequence[File]) -> List[Dict[str, Any]]:
-    """The presigned upload flow: ask for addresses, PUT the bytes, return the attachment list."""
+UploadCreator = Callable[[List[Dict[str, Any]]], Awaitable[Any]]
+
+
+async def _upload_files(
+    state: Any, channel_id: Optional[int], files: Sequence[File], *, create: Optional[UploadCreator] = None
+) -> List[Dict[str, Any]]:
+    """The presigned upload flow: ask for addresses, PUT the bytes, return the attachment list.
+
+    ``create`` asks for the addresses: an interaction's or a webhook's token
+    route; without it, the bot's own ``POST /channels/{id}/attachments``.
+    """
     if len(files) > 10:
         raise ValueError('files has a maximum of 10 elements.')
     blobs: List[Tuple[File, bytes]] = []
@@ -224,7 +236,12 @@ async def _upload_files(state: ConnectionState, channel_id: int, files: Sequence
             raise TypeError(f'files must be a list of File, not {f.__class__.__name__}')
         blobs.append((f, f._read_all()))
     request = [{'fileName': f._filename, 'contentType': f.content_type, 'sizeBytes': len(data)} for f, data in blobs]
-    response = await state.http.create_attachments(channel_id, request)
+    if create is not None:
+        response = await create(request)
+    elif channel_id is not None:
+        response = await state.http.create_attachments(channel_id, request)
+    else:
+        raise NotSupported('Sending files here')
     slots = (response or {}).get('attachments') if isinstance(response, dict) else None
     if not isinstance(slots, list) or len(slots) != len(blobs):
         raise InvalidData('Bisim did not return an upload address for every file.')
@@ -252,9 +269,9 @@ def _view_payload(view: Any) -> Optional[List[Dict[str, Any]]]:
     return view.to_components()
 
 
-def _flags_value(*, silent: bool = False, suppress_embeds: bool = False, ephemeral: bool = False) -> int:
+def _flags_value(*, silent: bool = False, suppress_embeds: Any = False, ephemeral: bool = False) -> int:
     value = 0
-    if suppress_embeds:
+    if suppress_embeds is not utils.MISSING and suppress_embeds:
         value |= 4
     if ephemeral:
         value |= 64
@@ -263,8 +280,57 @@ def _flags_value(*, silent: bool = False, suppress_embeds: bool = False, ephemer
     return value
 
 
+def _allowed_mentions_payload(
+    state: Any, allowed_mentions: Any = utils.MISSING, mention_author: Optional[bool] = None
+) -> Optional[Dict[str, Any]]:
+    """discord.py's rule: the message's own ``allowed_mentions`` merged over the client's, and
+    ``mention_author`` deciding ``repliedUser``. ``None`` means the field is left out, so every
+    mention in the text may ping."""
+    previous: Optional[AllowedMentions] = getattr(state, 'allowed_mentions', None)
+    if not isinstance(previous, AllowedMentions):
+        previous = None
+    payload: Optional[Dict[str, Any]] = None
+    if allowed_mentions is not utils.MISSING and allowed_mentions is not None:
+        if not isinstance(allowed_mentions, AllowedMentions):
+            raise TypeError(f'allowed_mentions must be AllowedMentions not {allowed_mentions.__class__.__name__}')
+        merged = previous.merge(allowed_mentions) if previous is not None else allowed_mentions
+        payload = merged.to_dict()
+    elif previous is not None:
+        payload = previous.to_dict()
+    if mention_author is not None:
+        if payload is None:
+            payload = AllowedMentions().to_dict()
+        payload['repliedUser'] = bool(mention_author)
+    return payload
+
+
+def _file_names(new_files: Sequence[Any], kept: Sequence[Any]) -> Dict[str, str]:
+    """The names an ``attachment://`` picture may use, each mapped to the name its file is sent under."""
+    names: Dict[str, str] = {}
+    for item in kept:
+        name = getattr(item, 'filename', None)
+        if name is None and isinstance(item, dict):
+            name = item.get('fileName') or item.get('filename')
+        if name:
+            names[str(name)] = str(name)
+    for f in new_files:
+        if isinstance(f, File):
+            names[f._filename] = f._filename
+            names[f.filename] = f._filename
+    return names
+
+
+def _kept_attachment(item: Any) -> Dict[str, Any]:
+    """A file the edited message keeps: ``{id}`` alone, as Bisim (and Discord v10) take it."""
+    if isinstance(item, dict):
+        if 'uploadFilename' in item:
+            return dict(item)
+        return {'id': str(item['id'])}
+    return {'id': str(item.id)}
+
+
 async def _message_payload(
-    state: ConnectionState,
+    state: Any,
     channel_id: Optional[int],
     *,
     content: Any = utils.MISSING,
@@ -280,10 +346,24 @@ async def _message_payload(
     nonce: Any = None,
     tts: bool = False,
     silent: bool = False,
-    suppress_embeds: bool = False,
+    suppress_embeds: Any = utils.MISSING,
     ephemeral: bool = False,
+    allowed_mentions: Any = utils.MISSING,
+    mention_author: Optional[bool] = None,
     editing: bool = False,
+    create_uploads: Optional[UploadCreator] = None,
+    known_files: Optional[Sequence[Any]] = None,
 ) -> Dict[str, Any]:
+    """The body of a message Bisim takes, for a send or an edit.
+
+    ``create_uploads`` asks for upload addresses (an interaction's or a
+    webhook's token); without it the files go through ``channel_id``. In an
+    edit, ``attachments`` is the whole list after the edit (an
+    :class:`Attachment` is kept, a :class:`File` is added, anything left out
+    is removed), and ``suppress_embeds`` changes the message's suppress embeds
+    flag when it is given. ``known_files`` are the files an edit that leaves
+    ``attachments`` out keeps, when the library knows them.
+    """
     payload: Dict[str, Any] = {}
 
     if content is not utils.MISSING:
@@ -295,11 +375,39 @@ async def _message_payload(
         tokens = ' '.join(f'<sticker:{s.id}>' for s in stickers)
         payload['content'] = f"{payload['content']} {tokens}" if payload.get('content') else tokens
 
+    if file is not utils.MISSING and files is not utils.MISSING and file is not None and files is not None:
+        raise TypeError('Cannot mix file and files keyword arguments.')
+    upload: List[File] = []
+    if file is not utils.MISSING and file is not None:
+        upload = [file]
+    elif files is not utils.MISSING and files is not None:
+        upload = list(files)
+
+    kept_items: List[Any] = []
+    if attachments is not utils.MISSING and attachments is not None:
+        for item in attachments:
+            if isinstance(item, File):
+                upload.append(item)
+            else:
+                kept_items.append(item)
+
+    # What an ``attachment://`` picture may name: the files the message will have. An edit
+    # that keeps files the library does not know lets Bisim decide (``None``).
+    picture_files: Any
+    if editing and attachments is utils.MISSING:
+        picture_files = None if known_files is None else _file_names(upload, list(known_files))
+    else:
+        picture_files = _file_names(upload, kept_items)
+
     if embed is not utils.MISSING or embeds is not utils.MISSING:
         if embed is None and embeds is utils.MISSING:
             payload['embeds'] = []
         else:
-            built = _embeds_payload(embed if embed is not utils.MISSING else None, embeds if embeds is not utils.MISSING else None)
+            built = _embeds_payload(
+                embed if embed is not utils.MISSING else None,
+                embeds if embeds is not utils.MISSING else None,
+                picture_files,
+            )
             payload['embeds'] = built or []
         if not editing and not payload['embeds']:
             del payload['embeds']
@@ -324,33 +432,25 @@ async def _message_payload(
     if not editing:
         payload['nonce'] = str(nonce) if nonce is not None else secrets.token_hex(8)
 
-    flags = _flags_value(silent=silent, suppress_embeds=suppress_embeds, ephemeral=ephemeral)
-    if flags:
-        payload['flags'] = flags
+    if editing:
+        # An edit changes only the suppress embeds flag, and only when asked.
+        if suppress_embeds is not utils.MISSING:
+            payload['flags'] = 4 if suppress_embeds else 0
+    else:
+        flags = _flags_value(silent=silent, suppress_embeds=suppress_embeds, ephemeral=ephemeral)
+        if flags:
+            payload['flags'] = flags
     if tts:
         payload['tts'] = True
 
-    if file is not utils.MISSING and files is not utils.MISSING and file is not None and files is not None:
-        raise TypeError('Cannot mix file and files keyword arguments.')
-    upload: List[File] = []
-    if file is not utils.MISSING and file is not None:
-        upload = [file]
-    elif files is not utils.MISSING and files is not None:
-        upload = list(files)
+    mentions = _allowed_mentions_payload(state, allowed_mentions, mention_author)
+    if mentions is not None:
+        payload['allowedMentions'] = mentions
 
-    kept: List[Dict[str, Any]] = []
-    if attachments is not utils.MISSING and attachments is not None:
-        for item in attachments:
-            if isinstance(item, File):
-                upload.append(item)
-            else:
-                kept.append(item.to_dict() if hasattr(item, 'to_dict') else item)
-
+    kept = [_kept_attachment(item) for item in kept_items]
     if upload:
-        if channel_id is None:
-            raise NotSupported('Sending files here')
         try:
-            payload['attachments'] = kept + await _upload_files(state, channel_id, upload)
+            payload['attachments'] = kept + await _upload_files(state, channel_id, upload, create=create_uploads)
         finally:
             for f in upload:
                 f.close()
@@ -496,7 +596,6 @@ class GuildChannel:
             ('default_sort_order', 'Forum channels'),
             ('default_forum_layout', 'Forum channels'),
             ('flags', 'Channel flags'),
-            ('status', 'Setting a voice channel status from a bot'),
         ):
             if options.get(unsupported, utils.MISSING) is not utils.MISSING:
                 raise NotSupported(feature)
@@ -530,6 +629,13 @@ class GuildChannel:
         data: Optional[Dict[str, Any]] = None
         if payload:
             data = await self._state.http.edit_channel(self.guild.id, self.id, reason=reason, **payload)
+
+        status = options.get('status', utils.MISSING)
+        if status is not utils.MISSING:
+            # A voice channel's status line has its own route (the bot must be in that call).
+            answer = await self._state.http.edit_voice_channel_status(self.id, status, reason=reason)
+            new_status = answer.get('status') if isinstance(answer, dict) else status
+            self.status = new_status or None  # type: ignore
 
         if overwrites is not utils.MISSING:
             if not isinstance(overwrites, dict):
@@ -1342,11 +1448,17 @@ class Messageable:
             before deleting the message we just sent. If the deletion fails,
             then it is silently ignored.
         allowed_mentions: :class:`~bisim.AllowedMentions`
-            Accepted for compatibility; Bisim does not filter mentions per message.
+            Controls the mentions being processed in this message. If this is
+            passed, then the object is merged with :attr:`~bisim.Client.allowed_mentions`.
+            The merging behaviour only overrides attributes that have been explicitly passed
+            to the object, otherwise it uses the attributes set in :attr:`~bisim.Client.allowed_mentions`.
+            If no object is passed at all then the defaults given by :attr:`~bisim.Client.allowed_mentions`
+            are used instead. A mention that is not allowed is written as plain words.
         reference: Union[:class:`~bisim.Message`, :class:`~bisim.MessageReference`, :class:`~bisim.PartialMessage`]
             A reference to the :class:`~bisim.Message` to which you are replying.
         mention_author: Optional[:class:`bool`]
-            Accepted for compatibility.
+            If set, overrides the :attr:`~bisim.AllowedMentions.replied_user` attribute of ``allowed_mentions``.
+            A reply pings nobody on Bisim, so this only travels with the message.
         view: :class:`bisim.ui.View`
             A Bisim UI View to add to the message.
         stickers: Sequence[Union[:class:`~bisim.GuildSticker`, :class:`~bisim.StickerItem`]]
@@ -1401,6 +1513,8 @@ class Messageable:
             tts=tts,
             silent=silent,
             suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
+            mention_author=mention_author,
         )
         if view is not None and not hasattr(view, '__bisim_ui_view__'):
             raise TypeError(f'view parameter must be View not {view.__class__.__name__}')

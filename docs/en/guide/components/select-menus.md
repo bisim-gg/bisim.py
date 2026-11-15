@@ -100,9 +100,23 @@ class Setup(ui.View):
 `channel_types` limits a channel menu to some kinds of channel: `ChannelType.text`, `ChannelType.voice` and
 `ChannelType.category` are the ones Bisim has. In a direct message a channel menu has nothing to show.
 
-!!! note
-    Discord lets these menus start with some members, roles or channels already chosen (`default_values`). Bisim does
-    not have that, so passing `default_values` raises `bisim.NotSupported`.
+### Starting with a choice
+
+A user, role, mentionable or channel menu can start with some members, roles or channels already chosen:
+`default_values`, as in discord.py. Pass the objects themselves, `bisim.Object` (a mentionable menu needs its
+`type=`) or `bisim.SelectDefaultValue`. Their number must be between `min_values` and `max_values`; a string menu
+marks its defaults on its options with `default=True` instead.
+
+```python
+@ui.select(cls=ui.RoleSelect, placeholder='Roles that may post', max_values=3, default_values=[bisim.Object(id=ROLE_ID)])
+async def poster_roles(self, interaction: bisim.Interaction, select: ui.RoleSelect) -> None:
+    ...
+
+menu = ui.UserSelect(default_values=[interaction.user], max_values=5)
+menu.default_values  # [<SelectDefaultValue id=... type=<SelectDefaultValueType.user: 'user'>>]
+```
+
+A menu read back from a message has them in `component.default_values`.
 
 ## Answering a choice
 

@@ -151,7 +151,9 @@ The connection follows what happens on the server:
   waits for it (up to `timeout` seconds).
 
 `on_voice_state_update` reports the bot's own joins, moves and leaves like everyone else's, and
-`member.voice` and `VoiceChannel.members` include it.
+`member.voice` and `VoiceChannel.members` include it. Other people's voice states need the `voice_states`
+intent (in `Intents.default()`), and `VoiceChannel.members` lists only the members in the cache, so it needs
+the `members` intent too; `VoiceChannel.voice_states` has everyone's ids either way.
 
 ## Receiving voice
 
@@ -219,6 +221,29 @@ await vc.channel.send_sound(sounds[0])
 
 The bot must be in that channel. Everyone in the channel hears the sound; it does not go through the bot's
 own audio, so it plays on top of whatever the bot is playing.
+
+When anyone plays a sound in a channel the bot can see, `on_voice_channel_effect` is called, and a server's
+new, changed and deleted sounds arrive as `on_soundboard_sound_create`, `_update` and `_delete`. Bisim does not
+send the sounds when the bot connects: `guild.soundboard_sounds` holds the ones the library has seen, so call
+`fetch_soundboard_sounds()` once to load them all.
+
+```python
+@client.event
+async def on_voice_channel_effect(effect: bisim.VoiceChannelEffect) -> None:
+    if effect.is_sound():
+        sound = effect.channel.guild.get_soundboard_sound(effect.sound.id)
+        print(f'{effect.user} played {sound or effect.sound.id} in {effect.channel}')
+```
+
+## The channel's status
+
+While the bot is in a voice channel, it can set the channel's status line, as on Discord (it needs Set Voice
+Channel Status):
+
+```python
+await vc.channel.edit(status='Now playing: Lo-fi radio')
+await vc.channel.edit(status=None)  # clears it
+```
 
 ## A small music bot
 

@@ -64,8 +64,9 @@ An option passed in the code wins over the environment.
 
 ## The token
 
-A token belongs to the server that issued it. Create the application on the local server, in its Settings,
-Applications, and use that token: a token from bisim.gg is refused by a local server, and the other way round.
+A token belongs to the server that issued it. Create the application on the local server, in its Developer
+Portal (Settings, Developer Portal), and use that token: a token from bisim.gg is refused by a local server,
+and the other way round.
 
 ## Checking the connection
 

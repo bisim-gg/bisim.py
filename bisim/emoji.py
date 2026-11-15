@@ -174,13 +174,47 @@ class Emoji(_EmojiTag, AssetMixin):
         await self._state.http.delete_custom_emoji(self.guild_id, self.id, reason=reason)
 
     async def edit(self, *, name: str = utils.MISSING, roles: Any = utils.MISSING, reason: Optional[str] = None) -> Emoji:
-        """|coro|
+        r"""|coro|
 
-        Editing an emoji is not supported on Bisim: delete it and upload it again.
+        Edits the custom emoji.
+
+        You must have :attr:`~Permissions.manage_expressions` to do this, or
+        :attr:`~Permissions.create_expressions` for an emoji the bot made.
+
+        Parameters
+        -----------
+        name: :class:`str`
+            The new emoji name: 2 to 32 letters, digits or underscores.
+        roles: List[:class:`~bisim.abc.Snowflake`]
+            Not supported on Bisim: every member may use a server's emoji.
+        reason: Optional[:class:`str`]
+            The reason for editing this emoji. Shows up on the audit log.
 
         Raises
         -------
+        Forbidden
+            You are not allowed to edit emojis.
+        HTTPException
+            An error occurred editing the emoji.
         NotSupported
-            Always.
+            ``roles`` was given.
+
+        Returns
+        --------
+        :class:`Emoji`
+            The newly updated emoji.
         """
-        raise NotSupported('Editing an emoji')
+        if roles is not utils.MISSING:
+            raise NotSupported('Role-locked emoji')
+        payload: Dict[str, Any] = {}
+        if name is not utils.MISSING:
+            payload['name'] = name
+        if not payload:
+            return self
+        data = await self._state.http.edit_custom_emoji(self.guild_id, self.id, payload=payload, reason=reason)
+        guild = self.guild
+        if guild is not None:
+            return self._state.store_emoji(guild, data)  # type: ignore
+        from .object import Object
+
+        return Emoji(guild=Object(id=self.guild_id), state=self._state, data=data)

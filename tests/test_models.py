@@ -348,7 +348,7 @@ def test_embed_leaves_out_a_picture_that_is_not_a_web_link(caplog, monkeypatch):
         assert embed._to_bisim() == {'title': 'Chart', 'footer': {'text': 'Footer'}}
         embed._to_bisim()
     assert embed.image.url == 'attachment://chart.png'
-    assert len([r for r in caplog.records if 'not shown on Bisim' in r.getMessage()]) == 1
+    assert len([r for r in caplog.records if 'were left out' in r.getMessage()]) == 1
 
 
 def test_embed_reads_the_pictures_bisim_sends_back():

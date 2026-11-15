@@ -8,9 +8,22 @@ discord.py](moving-from-discord-py.md) lists every difference.
 
 ## Do I need to enable intents?
 
-No. Intents are accepted and change nothing: a bot receives every event its permissions let it see, and
-messages always carry their text. Keep `intents=bisim.Intents.default()` so the code stays the same as on
-discord.py.
+Only the privileged ones you use, as on Discord. `bisim.Intents.default()` covers everything except
+`members`, `presences` and `message_content`. To read the text of messages in servers, to get member events
+and the member list, or to see members' status, turn the intent on in your code and switch it on for the bot
+at [bisim.gg/developers](https://bisim.gg/developers) (your application, **Bot**, **Privileged Gateway
+Intents**). From 100 servers on, Bisim must approve it too. See [Intents](topics/events.md#intents).
+
+## My bot stops with PrivilegedIntentsRequired
+
+The bot asked for a privileged intent that is not switched on for it (close code 4014). Switch it on at
+[bisim.gg/developers](https://bisim.gg/developers), or take it out of your `Intents`.
+
+## message.content is empty
+
+The bot does not have the `message_content` intent. Without it, messages in servers arrive without their
+text, except the bot's own messages, messages that mention it and DMs. Turn it on as described above, or use
+slash commands, which need no intent.
 
 ## My slash commands do not show up
 
@@ -41,15 +54,17 @@ channel per server and does not join DM calls. See [Voice](topics/voice.md).
 
 ## Why is my embed's image missing?
 
-Bisim shows an embed's image, thumbnail and author and footer icons when each is an `http` or `https` link.
-An `attachment://` picture is left out (bisim.py logs a warning once): send the file with `bisim.File`, or use
-a public link. A link that does not answer, or answers with something that is not a picture, is simply not
-shown. See [Embeds](topics/embeds.md).
+Bisim shows an embed's image, thumbnail and author and footer icons when each is an `http` or `https` link,
+or `attachment://name` for a file sent with the same message. An `attachment://` picture that names no file of
+the message is left out (bisim.py logs a warning once): send the file in the same message with `bisim.File`,
+or use a public link. A link that does not answer, or answers with something that is not a picture, is simply
+not shown. See [Embeds](topics/embeds.md).
 
 ## How do I keep my token safe?
 
-Read it from an environment variable, never put it in the code or a repository, and reset it in Bisim
-(Settings, Applications) if it may have leaked. Anyone with the token controls the bot.
+Read it from an environment variable, never put it in the code or a repository, and reset it in Bisim's
+Developer Portal ([bisim.gg/developers](https://bisim.gg/developers), your application, **Bot**, **Reset
+Token**) if it may have leaked. Anyone with the token controls the bot.
 
 ## How do I see what the library is doing?
 

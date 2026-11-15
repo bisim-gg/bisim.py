@@ -12,7 +12,9 @@ The quickest way is the `@client.event` decorator. The function's name is the ev
 ```python
 import bisim
 
-client = bisim.Client(intents=bisim.Intents.default())
+intents = bisim.Intents.default()
+intents.members = True  # on_member_join needs it (see Intents below)
+client = bisim.Client(intents=intents)
 
 
 @client.event
@@ -43,36 +45,129 @@ class MyClient(bisim.Client):
             await message.channel.send(f'Hello, {message.author.display_name}!')
 
 
-client = MyClient(intents=bisim.Intents.default())
+intents = bisim.Intents.default()
+intents.message_content = True  # to read message.content in servers
+client = MyClient(intents=intents)
 ```
 
 With `bisim.ext.commands`, `@bot.listen()` and `@commands.Cog.listener()` add more than one handler for the
 same event; see [cogs](../commands/cogs.md).
 
+## Intents
+
+Intents tell Bisim which events the bot wants. They are Discord's, bit for bit, and you pass them to the
+client:
+
+```python
+intents = bisim.Intents.default()
+intents.members = True          # privileged
+intents.message_content = True  # privileged
+
+client = bisim.Client(intents=intents)
+```
+
+`Intents.default()` turns on everything except the three privileged intents, `Intents.all()` turns on
+everything and `Intents.none()` nothing. The library sends them when it connects, and the gateway sends the bot
+only the events they cover. Each flag of [`Intents`](../../reference/permissions-and-flags.md) lists its events; the main ones:
+
+| Intent | Events |
+| --- | --- |
+| `guilds` | servers, channels, roles, pins and voice channel status; leave it on |
+| `members` (privileged) | members joining, leaving and changing |
+| `moderation` | bans, unbans and new audit log entries |
+| `expressions` | custom emoji and stickers |
+| `webhooks` | `on_webhooks_update` |
+| `invites` | `on_invite_create`, `on_invite_delete` |
+| `voice_states` | `on_voice_state_update` (the bot's own voice state always arrives) |
+| `presences` (privileged) | `on_presence_update` |
+| `guild_messages`, `dm_messages` | messages in servers and in DMs |
+| `guild_reactions`, `dm_reactions` | reactions |
+| `guild_typing`, `dm_typing` | `on_typing` |
+| `message_content` (privileged) | the text of messages (see below) |
+| `auto_moderation_configuration` | AutoMod rules made, changed and deleted |
+| `auto_moderation_execution` | `on_automod_action` |
+| `guild_polls`, `dm_polls` | poll votes |
+
+Interactions (slash commands, buttons, select menus, modals) arrive whatever the intents, and so does
+`on_guild_join`.
+
+### The privileged intents
+
+| Intent | What it gives |
+| --- | --- |
+| `members` | `on_member_join`, `on_member_remove`, `on_member_update`, and the member list: the library loads every member at startup, and `Guild.chunk()` and `Guild.fetch_members()` work |
+| `presences` | `on_presence_update` and members' status and activity; without it everyone reads as offline |
+| `message_content` | the text, embeds, attachments, components and poll of messages in servers |
+
+To use one, switch it on for the bot first: open [bisim.gg/developers](https://bisim.gg/developers), choose your
+application, then **Bot**, and turn it on under **Privileged Gateway Intents**. While the bot is in fewer than
+100 servers that is all. From 100 servers on, Bisim must also approve each privileged intent for the
+application; one that is switched on but not approved is refused like one that is off.
+
+Without `members`, the library does not load the member list: `guild.members` holds the bot and the members it
+has heard about, and `Guild.chunk()` and `Guild.fetch_members()` raise `ClientException`.
+`Guild.fetch_member()` and `Guild.query_members()` still work, and `message.author` is still a `Member`, built
+from the membership that comes with each message.
+
+### When the gateway refuses the intents
+
+The gateway checks the intents when the bot connects, and closes the connection before anything else:
+
+- **4014**: a privileged intent that is not switched on, or not approved. `client.run()` and `client.start()`
+  raise `bisim.PrivilegedIntentsRequired`.
+- **4013**: a bit that is not an intent. They raise `bisim.ConnectionClosed` with `code` 4013.
+
+The library does not reconnect after either one, since the same intents would be refused again. Switch the
+intent on, or take it out of your `Intents`, and start the bot again.
+
+### Without Message Content
+
+A bot without `message_content` still receives every message event, but a message in a server arrives with
+`content` empty (`''`) and without embeds, attachments, components or poll, except:
+
+- the bot's own messages,
+- messages that mention the bot,
+- direct messages.
+
+Messages read over REST (`history()`, `fetch_message()`, `pins()`) follow the same rule, and so do
+`AutoModAction.content` and `matched_content`. Mentions still work: `message.mentions`, `message.role_mentions`,
+`message.raw_mentions` and `message.mention_everyone` come from Bisim, not from the text.
+
+Slash commands, buttons and the other interactions are not affected, so a bot built on them needs no
+privileged intent. Prefix commands need `message_content`, unless the prefix is a mention of the bot
+(`commands.when_mentioned`).
+
 ## The events you will use most
 
-| Event | When it is dispatched |
-| --- | --- |
-| `on_ready()` | Once, when every server has been loaded (see [your first bot](../your-first-bot.md)) |
-| `on_resumed()` | After a reconnect, once the servers have been loaded again |
-| `on_message(message)` | A message is sent in a channel the bot can see, its own messages included |
-| `on_message_edit(before, after)` | A message in the message cache is edited |
-| `on_message_delete(message)` | A message in the message cache is deleted |
-| `on_reaction_add(reaction, user)` | A reaction is added to a message in the message cache |
-| `on_member_join(member)` | Someone joins a server |
-| `on_member_remove(member)` | Someone leaves or is removed from a server |
-| `on_member_update(before, after)` | A member's nickname, roles or timeout changes |
-| `on_presence_update(before, after)` | A member's status or activity changes |
-| `on_guild_join(guild)` | The bot is added to a server |
-| `on_guild_remove(guild)` | The bot leaves or is removed from a server |
-| `on_guild_channel_update(before, after)` | A channel's name, topic, position or settings change |
-| `on_guild_role_create(role)` | A role is created |
-| `on_voice_state_update(member, before, after)` | Someone joins, leaves or moves between voice channels, or is muted |
-| `on_interaction(interaction)` | Any interaction arrives; `app_commands` and views handle them for you |
+| Event | When it is dispatched | Intent |
+| --- | --- | --- |
+| `on_ready()` | Once, when every server has been loaded (see [your first bot](../your-first-bot.md)) | |
+| `on_resumed()` | After a reconnect, once the servers have been loaded again | |
+| `on_message(message)` | A message is sent in a channel the bot can see, its own messages included | `guild_messages`, `dm_messages` |
+| `on_message_edit(before, after)` | A message in the message cache is edited | `guild_messages`, `dm_messages` |
+| `on_message_delete(message)` | A message in the message cache is deleted | `guild_messages`, `dm_messages` |
+| `on_reaction_add(reaction, user)` | A reaction is added to a message in the message cache | `guild_reactions`, `dm_reactions` |
+| `on_reaction_clear_emoji(reaction)` | Every reaction of one emoji is removed from a message in the message cache | `guild_reactions`, `dm_reactions` |
+| `on_member_join(member)` | Someone joins a server | `members` |
+| `on_member_remove(member)` | Someone leaves, is kicked or is banned | `members` |
+| `on_member_update(before, after)` | A member's nickname, roles or timeout changes | `members` |
+| `on_member_ban(guild, user)` | Someone is banned | `moderation` |
+| `on_presence_update(before, after)` | A member's status or activity changes | `presences` |
+| `on_guild_join(guild)` | The bot is added to a server | |
+| `on_guild_remove(guild)` | The bot leaves or is removed from a server | |
+| `on_guild_channel_create(channel)` | A channel is created | `guilds` |
+| `on_guild_channel_update(before, after)` | A channel's name, topic, position or settings change | `guilds` |
+| `on_guild_role_create(role)` | A role is created | `guilds` |
+| `on_voice_state_update(member, before, after)` | Someone joins, leaves or moves between voice channels, or is muted | `voice_states` |
+| `on_voice_channel_effect(effect)` | Someone plays a soundboard sound in a voice channel | `voice_states` |
+| `on_soundboard_sound_create(sound)` | A server adds a soundboard sound (also `_update` and `_delete`) | `expressions` |
+| `on_audit_log_entry_create(entry)` | Something is written to the audit log | `moderation` |
+| `on_automod_action(execution)` | An AutoMod rule blocks a message, sends an alert or times someone out | `auto_moderation_execution` |
+| `on_interaction(interaction)` | Any interaction arrives; `app_commands` and views handle them for you | |
 
-Bisim sends no separate event when a channel is created or deleted. The server tells the bot to reload it, and
-the library then dispatches `on_guild_channel_create` and `on_guild_channel_delete` from what changed, a moment
-after the change.
+Some of these also depend on the bot's permissions in the server, as on Discord: bans need Ban Members or View
+Audit Log, the audit log needs View Audit Log, invites need Manage Channels, AutoMod needs Manage Server, and
+channel and webhook events need the channel to be visible to the bot.
 
 ## Raw events
 
@@ -92,8 +187,8 @@ async def on_raw_reaction_add(payload: bisim.RawReactionActionEvent):
 ```
 
 The raw events are `on_raw_message_edit`, `on_raw_message_delete`, `on_raw_bulk_message_delete`,
-`on_raw_reaction_add`, `on_raw_reaction_remove`, `on_raw_reaction_clear`, `on_raw_typing`,
-`on_raw_member_remove` and, when the client is created with `enable_raw_presences=True`,
+`on_raw_reaction_add`, `on_raw_reaction_remove`, `on_raw_reaction_clear`, `on_raw_reaction_clear_emoji`,
+`on_raw_typing`, `on_raw_member_remove` and, when the client is created with `enable_raw_presences=True`,
 `on_raw_presence_update`.
 
 ## Waiting for an event
@@ -149,6 +244,6 @@ Errors in slash commands and prefix commands have their own handlers, described 
 ## Events Bisim does not send
 
 Some discord.py events never fire on Bisim, because Bisim has no such feature or does not tell bots about it:
-threads, scheduled events, stage instances, integrations, invites (`on_invite_create`, `on_invite_delete`) and
-bans (`on_member_ban`, `on_member_unban`). Registering a handler for them is harmless; it is simply never
-called.
+threads, scheduled events, stage instances, integrations, entitlements and application command
+permissions. The [event reference](../../reference/events.md#events-that-never-fire-on-bisim) lists them.
+Registering a handler for them is harmless; it is simply never called.

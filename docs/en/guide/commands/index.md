@@ -11,7 +11,7 @@ import bisim
 from bisim.ext import commands
 
 intents = bisim.Intents.default()
-intents.message_content = True  # accepted for compatibility; Bisim always sends message text
+intents.message_content = True  # prefix commands read the text (switch it on at bisim.gg/developers)
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -26,8 +26,10 @@ bot.run(os.environ['BISIM_TOKEN'])
 ```
 
 `commands.Bot` is a `bisim.Client` with commands, so everything a client does works here too, and it already has a
-`CommandTree` for slash commands as `bot.tree`. Bisim always sends the text of messages, so the `message_content`
-intent changes nothing; setting it keeps code written for discord.py unchanged.
+`CommandTree` for slash commands as `bot.tree`. A prefix command is read from the text of a message, so the bot
+needs the privileged `message_content` intent, switched on at [bisim.gg/developers](https://bisim.gg/developers)
+(see [Intents](../topics/events.md#intents)). Without it, only a prefix that mentions the bot
+(`commands.when_mentioned`) works, and the library logs a warning at startup.
 
 ## The prefix
 

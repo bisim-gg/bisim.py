@@ -130,6 +130,18 @@ The enumerations have discord.py's names and Discord's numbers, so values stored
     options:
       heading_level: 3
 
+::: bisim.AutoModRuleTriggerType
+    options:
+      heading_level: 3
+
+::: bisim.AutoModRuleEventType
+    options:
+      heading_level: 3
+
+::: bisim.AutoModRuleActionType
+    options:
+      heading_level: 3
+
 ::: bisim.InviteType
     options:
       heading_level: 3

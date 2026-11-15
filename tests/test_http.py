@@ -64,7 +64,7 @@ async def test_global_429_pauses_every_request(client, sleeps):
         return CallbackResult(
             status=429,
             payload={'message': 'Too many requests. Try again later.', 'code': 'RATE_LIMITED', 'retryAfter': 7},
-            headers={'Retry-After': '7', 'X-RateLimit-Limit': '600', 'X-RateLimit-Remaining': '0'},
+            headers={'Retry-After': '7', 'X-RateLimit-Limit': '600', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Global': 'true'},
         )
 
     real_sleep = sleeps

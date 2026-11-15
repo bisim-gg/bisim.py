@@ -18,7 +18,7 @@ import bisim
 from bisim.ext import commands, tasks
 
 intents = bisim.Intents.default()
-intents.message_content = True  # accepted for compatibility; Bisim always sends message text
+intents.message_content = True  # prefix commands read the text (switch it on at bisim.gg/developers)
 
 bot = commands.Bot(
     command_prefix=commands.when_mentioned_or('!'),

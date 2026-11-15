@@ -17,9 +17,10 @@ code (the command tree, views and modals) stays the same.
     pip install "bisim.py[http]"
     ```
 
-2. In Bisim, open **Settings**, **Applications**, your application, and fill in **Interactions URL** with a
-   public `https` address that reaches your bot.
-3. Copy the **public key** from the same page: 64 hex characters.
+2. In Bisim's Developer Portal (**Settings**, **Developer Portal**, or
+   [bisim.gg/developers](https://bisim.gg/developers)), open your application and, under **General
+   Information**, fill in **Interactions Endpoint URL** with a public `https` address that reaches your bot.
+3. Copy the **Public Key** from the same page: 64 hex characters.
 
 When you save the address, Bisim checks it: it sends a PING that must be answered `{"type": 1}`, and a request
 with a deliberately wrong signature that must be refused with status 401. bisim.py does both for you.

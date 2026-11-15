@@ -18,22 +18,38 @@ _log = logging.getLogger(__name__)
 # Bisim's (and Discord's) cap on an embed picture's address.
 _PICTURE_URL_MAX = 2048
 _WEB_URL = re.compile(r'^https?://[^/?#\s]', re.IGNORECASE)
+_ATTACHMENT_SCHEME = 'attachment://'
 _warned_picture = False
 
 
-def _picture_url(url: Any) -> Optional[str]:
+def _picture_url(url: Any, files: Any = utils.MISSING) -> Optional[str]:
     """A picture's address as Bisim takes it: an http or https link of at most
-    2048 characters. Anything else (discord.py's ``attachment://`` above all) is
-    left out with a warning, since Bisim would refuse the whole message for it."""
+    2048 characters, or ``attachment://name`` for a file of the same message.
+
+    ``files`` maps the names an ``attachment://`` may use to the names the
+    files are sent under (a :class:`File` named ``SPOILER_x.png`` is sent as
+    ``x.png``). Left out, the message has no files; ``None`` means the edit
+    keeps files the library does not know, so Bisim decides. A picture that
+    is neither is left out with one warning, since Bisim would refuse the
+    whole message for it."""
     global _warned_picture
     if not url:
         return None
     url = str(url)
     if _WEB_URL.match(url) and len(url) <= _PICTURE_URL_MAX:
         return url
+    if url.startswith(_ATTACHMENT_SCHEME):
+        name = url[len(_ATTACHMENT_SCHEME) :]
+        if name and files is None:
+            return url
+        if name and files is not utils.MISSING and name in files:
+            return _ATTACHMENT_SCHEME + files[name]
     if not _warned_picture:
         _warned_picture = True
-        _log.warning('Embed pictures that are not http or https links (such as attachment://) are not shown on Bisim and were left out.')
+        _log.warning(
+            'Embed pictures must be http or https links, or attachment://name naming a file of the same message; '
+            'the others were left out.'
+        )
     return None
 
 
@@ -100,8 +116,10 @@ class Embed:
 
         Bisim shows an embed's title, description, link, colour, timestamp,
         author (name, link and icon), footer (text and icon), fields, image
-        and thumbnail. A picture must be an HTTP(S) link: an
-        ``attachment://`` one is kept on this object but not sent.
+        and thumbnail. A picture is an HTTP(S) link, or ``attachment://name``
+        for a file sent (or kept) with the same message, as on Discord. An
+        ``attachment://`` that names no file of the message is kept on this
+        object but not sent.
 
     Attributes
     -----------
@@ -695,10 +713,11 @@ class Embed:
             result['title'] = self.title
         return result
 
-    def _to_bisim(self) -> Dict[str, Any]:
+    def _to_bisim(self, files: Any = utils.MISSING) -> Dict[str, Any]:
         """The nested shape a Bisim bot sends: title, description, url, color,
         timestamp, author {name, url, iconUrl}, footer {text, iconUrl}, fields,
-        image {url} and thumbnail {url}."""
+        image {url} and thumbnail {url}. ``files`` is what an ``attachment://``
+        picture may name (see ``_picture_url``)."""
         payload: Dict[str, Any] = {}
         if self.title:
             payload['title'] = self.title[:256]
@@ -717,13 +736,13 @@ class Embed:
             payload['author'] = {'name': author['name']}
             if author.get('url'):
                 payload['author']['url'] = author['url']
-            icon = _picture_url(author.get('icon_url'))
+            icon = _picture_url(author.get('icon_url'), files)
             if icon:
                 payload['author']['iconUrl'] = icon
         footer = getattr(self, '_footer', None)
         if footer and footer.get('text'):
             payload['footer'] = {'text': footer['text']}
-            icon = _picture_url(footer.get('icon_url'))
+            icon = _picture_url(footer.get('icon_url'), files)
             if icon:
                 payload['footer']['iconUrl'] = icon
         fields = getattr(self, '_fields', None)
@@ -733,7 +752,7 @@ class Embed:
             ]
         for attr in ('image', 'thumbnail'):
             media = getattr(self, '_' + attr, None)
-            url = _picture_url(media.get('url') if isinstance(media, dict) else None)
+            url = _picture_url(media.get('url') if isinstance(media, dict) else None, files)
             if url:
                 payload[attr] = {'url': url}
         return payload

@@ -66,7 +66,9 @@ import و توکن را عوض کنید تا ربات discord.py شما روی �
 import bisim
 from bisim import app_commands
 
-client = bisim.Client(intents=bisim.Intents.default())
+intents = bisim.Intents.default()
+intents.message_content = True  # to read '!hello' (switch it on at bisim.gg/developers)
+client = bisim.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
@@ -90,8 +92,8 @@ async def on_message(message: bisim.Message) -> None:
 client.run('your bot token')
 ```
 
-با `pip install bisim.py` نصبش کنید، ربات را در بی‌سیم از بخش تنظیمات، برنامه‌ها بسازید و از آن‌جا
-[راهنما](guide/index.md) را دنبال کنید.
+با `pip install bisim.py` نصبش کنید، ربات را در پورتال توسعه‌دهندگان بی‌سیم
+([bisim.gg/developers](https://bisim.gg/developers)) بسازید و از آن‌جا [راهنما](guide/index.md) را دنبال کنید.
 
 !!! note "ساخته‌شده بر پایهٔ discord.py"
 

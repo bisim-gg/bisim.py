@@ -27,9 +27,15 @@ default: Any = _FakeBool()
 class AllowedMentions:
     """A class that represents what mentions are allowed in a message.
 
-    Bisim does not filter mentions per message yet, so this object is accepted
-    everywhere discord.py takes one and does not change what is sent. It is
-    kept so that bots written for discord.py run unchanged.
+    This class can be set during :class:`Client` initialisation to apply
+    to every message sent. It can also be applied on a per message basis
+    via :meth:`abc.Messageable.send` for more fine-grained control.
+
+    Bisim follows Discord's rule: without it every mention in the text may
+    ping; with it only what it allows does, and a mention it does not allow
+    is written into the message as plain words (a person's or a role's name),
+    so it pings nobody. A reply pings nobody on Bisim, so :attr:`replied_user`
+    only travels with the message.
 
     Attributes
     ------------

@@ -68,11 +68,11 @@ await channel.send(files=[
 فایل‌هایی که دیگران فرستاده‌اند در `message.attachments` هستند. `await attachment.save('copy.png')` یکی از
 آن‌ها را روی دیسک می‌نویسد و `await attachment.to_file()` آن را به یک `File` تبدیل می‌کند تا دوباره بفرستید.
 
-!!! note "آنچه بی‌سیم دربارهٔ فایل‌ها پشتیبانی نمی‌کند"
-
-    فایل‌های یک پیام پس از فرستادن قابل تغییر نیستند، پس `message.edit(attachments=...)`، `add_files()` و
-    `remove_attachments()` خطای `bisim.NotSupported` می‌دهند. پاسخ تعامل‌ها و وب‌هوک‌ها هم هنوز فایل
-    نمی‌پذیرند.
+ربات می‌تواند مثل discord.py فایل‌های پیام‌های خودش را تغییر دهد: `message.edit(attachments=[...])` فهرست کامل
+فایل‌ها پس از ویرایش را می‌گیرد (هر `Attachment` پیام نگه داشته می‌شود، هر `File` بارگذاری و اضافه می‌شود و
+فایلی که در فهرست نباشد حذف می‌شود)، و `add_files()` و `remove_attachments()` همین کار را در یک قدم می‌کنند.
+پاسخ تعامل‌ها و وب‌هوک‌ها هم فایل می‌پذیرند. امبد با `attachment://name` یکی از فایل‌های پیام را نشان
+می‌دهد: [امبدها](embeds.md) را ببینید.
 
 ## خواندن پیام‌ها
 
@@ -125,10 +125,26 @@ await channel.send(report)
 
 سنجاق کردن پیام دسترسی سنجاق پیام‌ها (Pin Messages) می‌خواهد.
 
+## منشن‌ها و پرچم‌ها
+
+`allowed_mentions` مثل دیسکورد کار می‌کند، برای هر پیام یا با `Client(allowed_mentions=...)` برای کل کلاینت:
+بدون آن هر منشن متن می‌تواند خبر کند؛ با آن فقط آن‌چه اجازه می‌دهد خبر می‌کند و بی‌سیم بقیه را به‌صورت متن ساده
+(نام آن شخص یا نقش) در پیام می‌نویسد، پس کسی را خبر نمی‌کند.
+
+```python
+await channel.send('Server restart in 5 minutes, @everyone', allowed_mentions=bisim.AllowedMentions(everyone=False))
+await channel.send(f'Thanks {member.mention}', silent=True)  # no notification
+await channel.send('https://example.com', suppress_embeds=True)  # no link card
+await message.edit(suppress=True)  # hide a message's embeds; suppress=False brings them back
+```
+
+`message.flags.suppress_embeds` و `message.flags.silent` می‌گویند پیام با چه پرچم‌هایی فرستاده شده؛ پیامی که
+امبدهایش پنهان شده `message.embeds` خالی دارد.
+
 ## آنچه در بی‌سیم نیست
 
 این‌ها `bisim.NotSupported` می‌دهند: رشته‌ها (`message.create_thread()`)، بازارسال (`message.forward()`) و
-انتشار در کانال‌های اعلان (`message.publish()`). خواندن متن با صدا (`tts=True`) و `allowed_mentions` پذیرفته
-می‌شوند و نادیده گرفته می‌شوند.
+انتشار در کانال‌های اعلان (`message.publish()`). خواندن متن با صدا (`tts=True`) پذیرفته می‌شود و نادیده گرفته
+می‌شود.
 
 فهرست کامل متدهای پیام در [مرجع API](../../reference.md) آمده است.

@@ -66,7 +66,9 @@ Python 3.9 or newer, asyncio with aiohttp, type hints throughout, and tests that
 import bisim
 from bisim import app_commands
 
-client = bisim.Client(intents=bisim.Intents.default())
+intents = bisim.Intents.default()
+intents.message_content = True  # to read '!hello' (switch it on at bisim.gg/developers)
+client = bisim.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
@@ -90,8 +92,8 @@ async def on_message(message: bisim.Message) -> None:
 client.run('your bot token')
 ```
 
-Install it with `pip install bisim.py`, create the bot in Bisim under Settings, Applications, and follow the
-[guide](guide/index.md) from there.
+Install it with `pip install bisim.py`, create the bot in Bisim's Developer Portal
+([bisim.gg/developers](https://bisim.gg/developers)), and follow the [guide](guide/index.md) from there.
 
 !!! note "Built on discord.py"
 

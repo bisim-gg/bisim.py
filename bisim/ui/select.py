@@ -22,7 +22,6 @@ from typing import (
 from .. import utils
 from ..components import SelectDefaultValue, SelectMenu, SelectOption
 from ..enums import ChannelType, ComponentType, SelectDefaultValueType
-from ..errors import NotSupported
 from ..member import Member
 from ..object import Object
 from ..partial_emoji import PartialEmoji
@@ -102,6 +101,60 @@ def _resolve_value(interaction: Interaction[Any], raw: str, resolved: Dict[str, 
     return Object(id=value_id, type=cls) if cls is not None else Object(id=value_id)
 
 
+def _handle_select_defaults(defaults: Any, component_type: ComponentType) -> List[SelectDefaultValue]:
+    """discord.py's rule for ``default_values``: users, members, roles, channels,
+    :class:`~bisim.Object` (with a ``type`` where the select takes more than one
+    kind) or :class:`~bisim.SelectDefaultValue`, each turned into an id and its kind."""
+    if defaults is utils.MISSING or not defaults:
+        return []
+
+    from ..abc import GuildChannel
+    from ..app_commands.models import AppCommandChannel, AppCommandThread
+    from ..user import BaseUser
+
+    supported: Dict[ComponentType, Tuple[type, ...]] = {
+        ComponentType.user_select: (BaseUser, Member, Object),
+        ComponentType.role_select: (Role, Object),
+        ComponentType.channel_select: (GuildChannel, AppCommandChannel, AppCommandThread, Object),
+        ComponentType.mentionable_select: (BaseUser, Member, Role, Object),
+    }
+    allowed = supported.get(component_type)
+    if allowed is None:
+        raise TypeError('only user, role, mentionable and channel selects take default_values')
+
+    values: List[SelectDefaultValue] = []
+    for obj in defaults:
+        if isinstance(obj, SelectDefaultValue):
+            values.append(obj)
+            continue
+
+        object_type: Any = obj.type if isinstance(obj, Object) else obj.__class__
+        if not isinstance(object_type, type) or not issubclass(object_type, allowed):
+            names = utils._human_join([c.__name__ for c in allowed])
+            raise TypeError(f'Expected an instance of {names} not {getattr(object_type, "__name__", object_type)}')
+
+        if object_type is Object:
+            if component_type is ComponentType.mentionable_select:
+                raise ValueError(
+                    'Object must have a type specified for the chosen select type. Please pass one using the `type`` kwarg.'
+                )
+            kind = {
+                ComponentType.user_select: SelectDefaultValueType.user,
+                ComponentType.role_select: SelectDefaultValueType.role,
+                ComponentType.channel_select: SelectDefaultValueType.channel,
+            }[component_type]
+        elif issubclass(object_type, Role):
+            kind = SelectDefaultValueType.role
+        elif issubclass(object_type, (BaseUser, Member)):
+            kind = SelectDefaultValueType.user
+        else:
+            kind = SelectDefaultValueType.channel
+
+        values.append(SelectDefaultValue(id=obj.id, type=kind))
+
+    return values
+
+
 class BaseSelect(Item[V]):
     """The base Select model that all other Select models inherit from.
 
@@ -144,9 +197,6 @@ class BaseSelect(Item[V]):
         custom_id = os.urandom(16).hex() if custom_id is utils.MISSING else custom_id
         if not isinstance(custom_id, str):
             raise TypeError(f'expected custom_id to be str not {custom_id.__class__.__name__}')
-        if default_values is not utils.MISSING and default_values:
-            raise NotSupported('Default values in select menus')
-
         self._underlying = SelectMenu._raw_construct(
             type=type,
             custom_id=custom_id,
@@ -156,7 +206,7 @@ class BaseSelect(Item[V]):
             disabled=disabled,
             channel_types=[] if channel_types is utils.MISSING else list(channel_types),
             options=[] if options is utils.MISSING else list(options),
-            default_values=[],
+            default_values=_handle_select_defaults(default_values, type),
             required=required,
             id=id,
         )
@@ -421,13 +471,15 @@ class UserSelect(BaseSelect[V]):
     disabled: :class:`bool`
         Whether the select is disabled or not.
     default_values: Sequence[:class:`~bisim.abc.Snowflake`]
-        Not supported on Bisim.
+        A list of objects representing the users that should be selected by default.
+        Number of items must be in range of ``min_values`` and ``max_values``.
     row: Optional[:class:`int`]
         The relative row this select menu belongs to.
     id: Optional[:class:`int`]
         Accepted for compatibility.
     """
 
+    __component_attributes__ = BaseSelect.__component_attributes__ + ('default_values',)
     _resolve_kinds = ('member', 'user')
 
     def __init__(
@@ -462,6 +514,15 @@ class UserSelect(BaseSelect[V]):
         return ComponentType.user_select
 
     @property
+    def default_values(self) -> List[SelectDefaultValue]:
+        """List[:class:`bisim.SelectDefaultValue`]: A list of default values for the select menu."""
+        return self._underlying.default_values
+
+    @default_values.setter
+    def default_values(self, value: Sequence[Any]) -> None:
+        self._underlying.default_values = _handle_select_defaults(value, self.type)
+
+    @property
     def values(self) -> List[Union[Member, User]]:
         """List[Union[:class:`bisim.Member`, :class:`bisim.User`]]: A list of members
         and users that have been selected by the user.
@@ -488,13 +549,15 @@ class RoleSelect(BaseSelect[V]):
     disabled: :class:`bool`
         Whether the select is disabled or not.
     default_values: Sequence[:class:`~bisim.abc.Snowflake`]
-        Not supported on Bisim.
+        A list of objects representing the roles that should be selected by default.
+        Number of items must be in range of ``min_values`` and ``max_values``.
     row: Optional[:class:`int`]
         The relative row this select menu belongs to.
     id: Optional[:class:`int`]
         Accepted for compatibility.
     """
 
+    __component_attributes__ = BaseSelect.__component_attributes__ + ('default_values',)
     _resolve_kinds = ('role',)
 
     def __init__(
@@ -529,6 +592,15 @@ class RoleSelect(BaseSelect[V]):
         return ComponentType.role_select
 
     @property
+    def default_values(self) -> List[SelectDefaultValue]:
+        """List[:class:`bisim.SelectDefaultValue`]: A list of default values for the select menu."""
+        return self._underlying.default_values
+
+    @default_values.setter
+    def default_values(self, value: Sequence[Any]) -> None:
+        self._underlying.default_values = _handle_select_defaults(value, self.type)
+
+    @property
     def values(self) -> List[Role]:
         """List[:class:`bisim.Role`]: A list of roles that have been selected by the user."""
         return list(self._values)
@@ -554,13 +626,16 @@ class MentionableSelect(BaseSelect[V]):
     disabled: :class:`bool`
         Whether the select is disabled or not.
     default_values: Sequence[:class:`~bisim.abc.Snowflake`]
-        Not supported on Bisim.
+        A list of objects representing the users/roles that should be selected by default.
+        if :class:`.Object` is passed, then the type must be specified in the constructor.
+        Number of items must be in range of ``min_values`` and ``max_values``.
     row: Optional[:class:`int`]
         The relative row this select menu belongs to.
     id: Optional[:class:`int`]
         Accepted for compatibility.
     """
 
+    __component_attributes__ = BaseSelect.__component_attributes__ + ('default_values',)
     _resolve_kinds = ('member', 'user', 'role')
 
     def __init__(
@@ -595,6 +670,15 @@ class MentionableSelect(BaseSelect[V]):
         return ComponentType.mentionable_select
 
     @property
+    def default_values(self) -> List[SelectDefaultValue]:
+        """List[:class:`bisim.SelectDefaultValue`]: A list of default values for the select menu."""
+        return self._underlying.default_values
+
+    @default_values.setter
+    def default_values(self, value: Sequence[Any]) -> None:
+        self._underlying.default_values = _handle_select_defaults(value, self.type)
+
+    @property
     def values(self) -> List[Union[Member, User, Role]]:
         """List[Union[:class:`bisim.Role`, :class:`bisim.Member`, :class:`bisim.User`]]: A list of roles, members,
         and users that have been selected by the user.
@@ -623,14 +707,15 @@ class ChannelSelect(BaseSelect[V]):
     disabled: :class:`bool`
         Whether the select is disabled or not.
     default_values: Sequence[:class:`~bisim.abc.Snowflake`]
-        Not supported on Bisim.
+        A list of objects representing the channels that should be selected by default.
+        Number of items must be in range of ``min_values`` and ``max_values``.
     row: Optional[:class:`int`]
         The relative row this select menu belongs to.
     id: Optional[:class:`int`]
         Accepted for compatibility.
     """
 
-    __component_attributes__ = BaseSelect.__component_attributes__ + ('channel_types',)
+    __component_attributes__ = BaseSelect.__component_attributes__ + ('channel_types', 'default_values')
     _resolve_kinds = ('channel',)
 
     def __init__(
@@ -665,6 +750,15 @@ class ChannelSelect(BaseSelect[V]):
     def type(self) -> ComponentType:
         """:class:`.ComponentType`: The type of this component."""
         return ComponentType.channel_select
+
+    @property
+    def default_values(self) -> List[SelectDefaultValue]:
+        """List[:class:`bisim.SelectDefaultValue`]: A list of default values for the select menu."""
+        return self._underlying.default_values
+
+    @default_values.setter
+    def default_values(self, value: Sequence[Any]) -> None:
+        self._underlying.default_values = _handle_select_defaults(value, self.type)
 
     @property
     def channel_types(self) -> List[ChannelType]:
@@ -758,7 +852,9 @@ def select(
     disabled: :class:`bool`
         Whether the select is disabled or not. Defaults to ``False``.
     default_values: Sequence[:class:`~bisim.abc.Snowflake`]
-        Not supported on Bisim.
+        A list of objects representing the default values for the select menu. This cannot be used with regular :class:`Select` instances.
+        If ``cls`` is :class:`MentionableSelect` and :class:`.Object` is passed, then the type must be specified in the constructor.
+        Number of items must be in range of ``min_values`` and ``max_values``.
     id: Optional[:class:`int`]
         Accepted for compatibility.
     """

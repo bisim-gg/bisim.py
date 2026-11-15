@@ -342,17 +342,29 @@ class ClientUser(BaseUser):
         Edits the current profile of the client.
 
         On Bisim a bot's name is its application's name, so changing
-        ``username`` renames the application (and the bot with it). Changing
-        the avatar, banner or bio of a bot is not supported.
+        ``username`` renames the application (and the bot with it). The
+        picture and the banner are the bot's own, checked and scanned like
+        anyone's.
+
+        .. note::
+
+            To upload an avatar, a :term:`py:bytes-like object` must be passed in that
+            represents the image being uploaded. If this is done through a file
+            then the file must be opened via ``open('some_filename', 'rb')`` and
+            the :term:`py:bytes-like object` is given through the use of ``fp.read()``.
 
         Parameters
         -----------
         username: :class:`str`
             The new username you wish to change to.
         avatar: Optional[:class:`bytes`]
-            Not supported on Bisim.
+            A :term:`py:bytes-like object` representing the image to upload.
+            Could be ``None`` to denote no avatar.
+            Only image formats supported for uploading are JPEG, PNG, GIF, and WEBP.
         banner: Optional[:class:`bytes`]
-            Not supported on Bisim.
+            A :term:`py:bytes-like object` representing the image to upload.
+            Could be ``None`` to denote no banner.
+            Only image formats supported for uploading are JPEG, PNG, GIF and WEBP.
         bio: Optional[:class:`str`]
             Not supported on Bisim.
 
@@ -360,23 +372,39 @@ class ClientUser(BaseUser):
         ------
         HTTPException
             Editing your profile failed.
+        ValueError
+            Wrong image format passed for ``avatar`` or ``banner``.
         NotSupported
-            An avatar, banner or bio was passed.
+            A bio was passed.
 
         Returns
         ---------
         :class:`ClientUser`
             The newly edited client user.
         """
-        if avatar is not utils.MISSING:
-            raise NotSupported("Changing a bot's avatar from the library")
-        if banner is not utils.MISSING:
-            raise NotSupported("Changing a bot's banner")
         if bio is not utils.MISSING:
             raise NotSupported("Changing a bot's bio")
+        http = self._state.http
+        changed = False
         if username is not utils.MISSING:
-            await self._state.http.edit_application(self.id, name=username)
-            data = await self._state.http.get_me()
+            await http.edit_application(self.id, name=username)
+            changed = True
+        if avatar is not utils.MISSING:
+            if avatar is None:
+                await http.delete_my_avatar()
+            else:
+                image = bytes(avatar)
+                await http.edit_my_avatar(image, utils._get_mime_type_for_image(image))
+            changed = True
+        if banner is not utils.MISSING:
+            if banner is None:
+                await http.delete_my_banner()
+            else:
+                image = bytes(banner)
+                await http.edit_my_banner(image, utils._get_mime_type_for_image(image))
+            changed = True
+        if changed:
+            data = await http.get_me()
             self._update(data)
         return self
 

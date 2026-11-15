@@ -54,8 +54,8 @@ library's docstrings.
 
 ## Coming from discord.py
 
-Most bots run unchanged, voice bots included. Intents are accepted and change nothing, and what Bisim does
-not have (threads, stage and forum channels, scheduled events, sharding) raises `bisim.NotSupported` instead
+Most bots run unchanged, voice bots included. Intents work as on Discord, privileged ones included, and what
+Bisim does not have (threads, stage and forum channels, scheduled events, sharding) raises `bisim.NotSupported` instead
 of failing silently. [Moving from discord.py](moving-from-discord-py.md) lists
 every difference.
 

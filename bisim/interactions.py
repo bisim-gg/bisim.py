@@ -404,6 +404,10 @@ class Interaction(Generic[ClientT]):
         self._original_response = message
         return message
 
+    async def _create_uploads(self, files: List[Dict[str, Any]]) -> Any:
+        """Upload addresses for files of this interaction's answers, asked for with its token."""
+        return await self._state.http.create_interaction_attachments(self.id, self.token, files)
+
     def _make_message(self, data: Dict[str, Any]) -> InteractionMessage:
         channel = self.channel
         if channel is None:
@@ -423,6 +427,7 @@ class Interaction(Generic[ClientT]):
         view: Optional[View] = utils.MISSING,
         allowed_mentions: Optional[AllowedMentions] = None,
         poll: Poll = utils.MISSING,
+        suppress_embeds: bool = utils.MISSING,
     ) -> InteractionMessage:
         """|coro|
 
@@ -445,14 +450,24 @@ class Interaction(Generic[ClientT]):
             The embed to edit the message with. ``None`` suppresses the embeds.
             This should not be mixed with the ``embeds`` parameter.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
         poll: :class:`Poll`
-            Not supported on Bisim.
+            Not supported on Bisim: a poll is sent as a new answer
+            (:meth:`InteractionResponse.send_message` or a followup).
+        suppress_embeds: :class:`bool`
+            Whether to suppress embeds for the message (``False`` brings them
+            back). This is a Bisim addition.
 
         Raises
         -------
@@ -466,20 +481,32 @@ class Interaction(Generic[ClientT]):
             You specified both ``embed`` and ``embeds``
         ValueError
             The length of ``embeds`` was invalid.
+        NotSupported
+            A poll was given.
 
         Returns
         --------
         :class:`InteractionMessage`
             The newly edited message.
         """
-        if attachments is not utils.MISSING:
-            raise NotSupported('Attachments in interaction responses')
-        if poll is not utils.MISSING:
-            raise NotSupported('Polls in interaction responses')
+        if poll is not utils.MISSING and poll is not None:
+            raise NotSupported('A poll in an edited interaction response')
         from .abc import _message_payload
 
+        known = self._original_response.attachments if self._original_response is not None else None
         payload = await _message_payload(
-            self._state, None, content=content, embed=embed, embeds=embeds, view=view, editing=True
+            self._state,
+            None,
+            content=content,
+            embed=embed,
+            embeds=embeds,
+            attachments=attachments,
+            view=view,
+            suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
+            editing=True,
+            create_uploads=self._create_uploads,
+            known_files=known,
         )
         data = await self._state.http.edit_original_interaction_response(self.id, self.token, payload)
         message = self._make_message(data)
@@ -767,9 +794,9 @@ class InteractionResponse(Generic[ClientT]):
             The rich embed for the content to send. This cannot be mixed with
             ``embeds`` parameter.
         file: :class:`~bisim.File`
-            Not supported in interaction responses on Bisim.
+            The file to upload.
         files: List[:class:`~bisim.File`]
-            Not supported in interaction responses on Bisim.
+            A list of files to upload. Must be a maximum of 10.
         tts: :class:`bool`
             Accepted for compatibility.
         view: :class:`bisim.ui.View`
@@ -779,7 +806,8 @@ class InteractionResponse(Generic[ClientT]):
             If a view is sent with an ephemeral message and it has no timeout set then the timeout
             is set to 15 minutes.
         allowed_mentions: :class:`~bisim.AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
         suppress_embeds: :class:`bool`
             Whether to suppress embeds for the message.
         silent: :class:`bool`
@@ -789,7 +817,8 @@ class InteractionResponse(Generic[ClientT]):
             before deleting the message we just sent. If the deletion fails,
             then it is silently ignored.
         poll: :class:`~bisim.Poll`
-            Not supported in interaction responses on Bisim.
+            The poll to send with this message. Bisim sends a poll on its own (no
+            text, embeds, files or view with it) and never in an ephemeral answer.
 
         Raises
         -------
@@ -801,8 +830,6 @@ class InteractionResponse(Generic[ClientT]):
             The length of ``embeds`` was invalid.
         InteractionResponded
             This interaction has already been responded to before.
-        NotSupported
-            Files or a poll were given.
 
         Returns
         -------
@@ -811,10 +838,6 @@ class InteractionResponse(Generic[ClientT]):
         """
         if self._response_type:
             raise InteractionResponded(self._parent)
-        if file is not utils.MISSING or files is not utils.MISSING:
-            raise NotSupported('Files in interaction responses')
-        if poll is not utils.MISSING:
-            raise NotSupported('Polls in interaction responses')
 
         from .abc import _message_payload
 
@@ -825,11 +848,16 @@ class InteractionResponse(Generic[ClientT]):
             content=content if content is not None else utils.MISSING,
             embed=embed,
             embeds=embeds,
+            file=file,
+            files=files,
             view=view,
+            poll=poll,
             tts=tts,
             silent=silent,
             suppress_embeds=suppress_embeds,
             ephemeral=ephemeral,
+            allowed_mentions=allowed_mentions,
+            create_uploads=parent._create_uploads,
         )
         payload.pop('nonce', None)
 
@@ -845,6 +873,8 @@ class InteractionResponse(Generic[ClientT]):
         )
         if isinstance(callback.resource, InteractionMessage):
             parent._original_response = callback.resource
+            if poll is not utils.MISSING and poll is not None:
+                poll._update_from_message(callback.resource)
 
         if view is not utils.MISSING and not view.is_finished():
             if ephemeral and view.timeout is None:
@@ -892,12 +922,18 @@ class InteractionResponse(Generic[ClientT]):
             The embed to edit the message with. ``None`` suppresses the embeds.
             This should not be mixed with the ``embeds`` parameter.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
         allowed_mentions: Optional[:class:`~bisim.AllowedMentions`]
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
         delete_after: :class:`float`
             If provided, the number of seconds to wait in the background
             before deleting the message we just edited. If the deletion fails,
@@ -921,8 +957,6 @@ class InteractionResponse(Generic[ClientT]):
         """
         if self._response_type:
             raise InteractionResponded(self._parent)
-        if attachments is not utils.MISSING:
-            raise NotSupported('Attachments in interaction responses')
 
         parent = self._parent
         msg = parent.message
@@ -943,9 +977,13 @@ class InteractionResponse(Generic[ClientT]):
             content=content,
             embed=embed,
             embeds=embeds,
+            attachments=attachments,
             view=view,
-            suppress_embeds=bool(suppress_embeds) if suppress_embeds is not utils.MISSING else False,
+            suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
             editing=True,
+            create_uploads=parent._create_uploads,
+            known_files=msg.attachments if msg is not None else None,
         )
 
         response = await self._callback(InteractionResponseType.message_update, payload)
@@ -1102,9 +1140,15 @@ class InteractionMessage(Message):
             The embed to edit the message with. ``None`` suppresses the embeds.
             This should not be mixed with the ``embeds`` parameter.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
@@ -1113,7 +1157,7 @@ class InteractionMessage(Message):
             before deleting the message we just sent. If the deletion fails,
             then it is silently ignored.
         poll: :class:`Poll`
-            Not supported on Bisim.
+            Not supported on Bisim: a poll cannot be added in an edit.
 
         Raises
         -------
@@ -1139,24 +1183,60 @@ class InteractionMessage(Message):
             view=view,
             allowed_mentions=allowed_mentions,
             poll=poll,
+            # Message.edit's spelling of the suppress embeds flag.
+            suppress_embeds=kwargs.get('suppress', utils.MISSING),
         )
         if delete_after is not None:
             await self.delete(delay=delete_after)
         return res
 
     async def add_files(self, *files: File) -> InteractionMessage:
-        """|coro|
+        r"""|coro|
 
-        Not supported on Bisim.
+        Adds new files to the end of the message attachments.
+
+        Parameters
+        -----------
+        \*files: :class:`File`
+            New files to add to the message.
+
+        Raises
+        -------
+        HTTPException
+            Editing the message failed.
+        Forbidden
+            Tried to edit a message that isn't yours.
+
+        Returns
+        --------
+        :class:`InteractionMessage`
+            The newly edited message.
         """
-        raise NotSupported('Attachments in interaction responses')
+        return await self.edit(attachments=[*self.attachments, *files])
 
     async def remove_attachments(self, *attachments: Attachment) -> InteractionMessage:
-        """|coro|
+        r"""|coro|
 
-        Not supported on Bisim.
+        Removes attachments from the message.
+
+        Parameters
+        -----------
+        \*attachments: :class:`Attachment`
+            Attachments to remove from the message.
+
+        Raises
+        -------
+        HTTPException
+            Editing the message failed.
+        Forbidden
+            Tried to edit a message that isn't yours.
+
+        Returns
+        --------
+        :class:`InteractionMessage`
+            The newly edited message.
         """
-        raise NotSupported('Attachments in interaction responses')
+        return await self.edit(attachments=[a for a in self.attachments if a not in attachments])
 
     async def delete(self, *, delay: Optional[float] = None) -> None:
         """|coro|
@@ -1275,7 +1355,8 @@ class InteractionFollowup:
         tts: :class:`bool`
             Accepted for compatibility.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
         suppress_embeds: :class:`bool`
             Whether to suppress embeds for the message.
         silent: :class:`bool`
@@ -1283,13 +1364,18 @@ class InteractionFollowup:
         wait: :class:`bool`
             Accepted for compatibility; the message is always returned.
         file: :class:`File`
-            Not supported in followups on Bisim.
+            The file to upload. This cannot be mixed with ``files`` parameter.
         files: List[:class:`File`]
-            Not supported in followups on Bisim.
+            A list of files to send with the content. This cannot be mixed with the
+            ``file`` parameter.
         thread: :class:`~bisim.abc.Snowflake`
             Not supported on Bisim (no threads).
         poll: :class:`Poll`
-            Not supported in followups on Bisim.
+            The poll to send with this message. Bisim sends a poll on its own and
+            never in an ephemeral message. After :meth:`InteractionResponse.defer`,
+            the first followup fills the "thinking" message, which cannot become a
+            poll: answer the thinking message first (with
+            :meth:`Interaction.edit_original_response`), then send the poll.
 
         Raises
         --------
@@ -1307,12 +1393,8 @@ class InteractionFollowup:
         :class:`WebhookMessage`
             The message that was sent.
         """
-        if file is not utils.MISSING or files is not utils.MISSING:
-            raise NotSupported('Files in interaction followups')
         if thread is not utils.MISSING or thread_name is not utils.MISSING or applied_tags is not utils.MISSING:
             raise NotSupported('Threads')
-        if poll is not utils.MISSING:
-            raise NotSupported('Polls in interaction followups')
 
         from .abc import _message_payload
 
@@ -1324,11 +1406,16 @@ class InteractionFollowup:
             content=content,
             embed=embed,
             embeds=embeds,
+            file=file,
+            files=files,
             view=view,
+            poll=poll,
             silent=silent,
             suppress_embeds=suppress_embeds,
             ephemeral=ephemeral,
             tts=tts,
+            allowed_mentions=allowed_mentions,
+            create_uploads=interaction._create_uploads,
         )
         payload.pop('nonce', None)
         data = await state.http.create_followup_message(interaction.id, interaction.token, payload)
@@ -1344,6 +1431,8 @@ class InteractionFollowup:
         message = self._make_message(data)
         if view is not utils.MISSING and view is not None and not view.is_finished() and view.is_dispatchable():
             state.store_view(view, message.id)
+        if poll is not utils.MISSING and poll is not None:
+            poll._update_from_message(message)
         return message
 
     async def fetch_message(self, id: int, /, *, thread: Any = utils.MISSING) -> WebhookMessage:
@@ -1383,6 +1472,7 @@ class InteractionFollowup:
         view: Optional[View] = utils.MISSING,
         allowed_mentions: Optional[AllowedMentions] = None,
         thread: Any = utils.MISSING,
+        suppress_embeds: bool = utils.MISSING,
     ) -> WebhookMessage:
         """|coro|
 
@@ -1402,9 +1492,18 @@ class InteractionFollowup:
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed.
+
+            .. note::
+
+                New files will always appear after current attachments.
         allowed_mentions: :class:`AllowedMentions`
-            Accepted for compatibility.
+            Controls the mentions being processed in this message.
+            See :meth:`.abc.Messageable.send` for more information.
+        suppress_embeds: :class:`bool`
+            Whether to suppress embeds for the message (``False`` brings them
+            back). This is a Bisim addition.
 
         Raises
         -------
@@ -1418,13 +1517,23 @@ class InteractionFollowup:
         :class:`WebhookMessage`
             The newly edited message.
         """
-        if attachments is not utils.MISSING:
-            raise NotSupported('Attachments in interaction followups')
         from .abc import _message_payload
 
         interaction = self._interaction
         state = interaction._state
-        payload = await _message_payload(state, None, content=content, embed=embed, embeds=embeds, view=view, editing=True)
+        payload = await _message_payload(
+            state,
+            None,
+            content=content,
+            embed=embed,
+            embeds=embeds,
+            attachments=attachments,
+            view=view,
+            suppress_embeds=suppress_embeds,
+            allowed_mentions=allowed_mentions,
+            editing=True,
+            create_uploads=interaction._create_uploads,
+        )
         data = await state.http.edit_followup_message(interaction.id, interaction.token, message_id, payload)
         message = self._make_message(data)
         if view and not view.is_finished() and view.is_dispatchable():

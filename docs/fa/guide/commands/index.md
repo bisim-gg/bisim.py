@@ -11,7 +11,7 @@ import bisim
 from bisim.ext import commands
 
 intents = bisim.Intents.default()
-intents.message_content = True  # accepted for compatibility; Bisim always sends message text
+intents.message_content = True  # prefix commands read the text (switch it on at bisim.gg/developers)
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
@@ -26,9 +26,10 @@ bot.run(os.environ['BISIM_TOKEN'])
 ```
 
 `commands.Bot` یک `bisim.Client` است که دستور هم دارد، پس هر کاری که کلاینت می‌کند این‌جا هم کار می‌کند، و برای
-دستورهای اسلش از پیش یک `CommandTree` با نام `bot.tree` دارد. بی‌سیم همیشه متن پیام‌ها را می‌فرستد، پس اینتنت
-`message_content` چیزی را تغییر نمی‌دهد؛ تنظیم کردنش فقط باعث می‌شود کدی که برای discord.py نوشته شده بدون تغییر
-اجرا شود.
+دستورهای اسلش از پیش یک `CommandTree` با نام `bot.tree` دارد. دستور پیشوندی از متن پیام خوانده می‌شود، پس ربات به
+اینتنت ویژهٔ `message_content` نیاز دارد که باید در [bisim.gg/developers](https://bisim.gg/developers) روشن شود
+([اینتنت‌ها](../topics/events.md#اینتنتها) را ببینید). بدون آن فقط پیشوندی که منشن خود ربات است
+(`commands.when_mentioned`) کار می‌کند و کتاب‌خانه هنگام شروع هشداری ثبت می‌کند.
 
 ## پیشوند
 

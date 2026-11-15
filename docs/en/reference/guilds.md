@@ -35,3 +35,21 @@ Bisim calls it a server and discord.py calls it a guild; bisim.py keeps discord.
 ::: bisim.AuditLogDiff
     options:
       heading_level: 3
+
+## AutoMod
+
+::: bisim.AutoModRule
+    options:
+      heading_level: 3
+
+::: bisim.AutoModAction
+    options:
+      heading_level: 3
+
+::: bisim.AutoModRuleAction
+    options:
+      heading_level: 3
+
+::: bisim.AutoModTrigger
+    options:
+      heading_level: 3

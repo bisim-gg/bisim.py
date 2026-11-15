@@ -50,6 +50,7 @@ from .errors import (
     LoginFailure,
     NotFound,
     NotSupported,
+    PrivilegedIntentsRequired,
 )
 from .flags import ApplicationFlags, Intents
 from .gateway import BisimWebSocket, ReconnectWebSocket
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
 
     from .abc import GuildChannel, PrivateChannel, Snowflake, SnowflakeTime
     from .message import Message
+    from .soundboard import SoundboardSound
 
 __all__ = ('Client',)
 
@@ -121,8 +123,13 @@ class Client:
     Parameters
     -----------
     intents: :class:`Intents`
-        Accepted for compatibility with discord.py. Bisim has no intents: a
-        bot gets every event its permissions let it see.
+        The intents that you want to enable for the session. This is a way of
+        disabling and enabling certain gateway events from triggering and being sent.
+        Defaults to :meth:`Intents.default`. The privileged ones
+        (:attr:`Intents.members`, :attr:`Intents.presences` and
+        :attr:`Intents.message_content`) must also be switched on for the
+        application at https://bisim.gg/developers, or connecting raises
+        :exc:`PrivilegedIntentsRequired`.
     max_messages: Optional[:class:`int`]
         The maximum number of messages to store in the internal message cache.
         This defaults to ``1000``. Passing in ``None`` disables the message cache.
@@ -137,7 +144,8 @@ class Client:
         Accepted for compatibility.
     chunk_guilds_at_startup: :class:`bool`
         Indicates if the member list of every server should be loaded when the
-        bot connects. Defaults to ``True``.
+        bot connects. This requires :attr:`Intents.members` and defaults to its
+        value. Without it, the cache holds the members the bot hears about.
     status: Optional[:class:`.Status`]
         A status to start your presence with upon logging on to Bisim.
     activity: Optional[:class:`.BaseActivity`]
@@ -149,7 +157,8 @@ class Client:
         WebSocket in the case of not receiving anything. Defaults to 60 seconds.
     guild_ready_timeout: :class:`float`
         The maximum number of seconds to wait for a server's presence snapshot
-        after subscribing to it. Defaults to 2 seconds.
+        after subscribing to it, with :attr:`Intents.presences` (without it
+        there is no snapshot to wait for). Defaults to 2 seconds.
     assume_unsync_clock: :class:`bool`
         Accepted for compatibility.
     enable_debug_events: :class:`bool`
@@ -293,9 +302,13 @@ class Client:
         return self._connection.stickers
 
     @property
-    def soundboard_sounds(self) -> List[Any]:
-        """List[Any]: Not loaded by the library yet."""
-        return []
+    def soundboard_sounds(self) -> List[SoundboardSound]:
+        """List[:class:`.SoundboardSound`]: The soundboard sounds the library has seen, in every server.
+
+        Bisim does not send the sounds when the bot connects: see
+        :attr:`Guild.soundboard_sounds`.
+        """
+        return [sound for guild in self.guilds for sound in guild.soundboard_sounds]
 
     @property
     def cached_messages(self) -> Sequence[Message]:
@@ -504,6 +517,9 @@ class Client:
             is thrown then there is a Bisim API outage.
         ConnectionClosed
             The websocket connection has been terminated.
+        PrivilegedIntentsRequired
+            The bot asked for privileged intents that its application has not
+            switched on (close code 4014).
         """
 
         backoff = ExponentialBackoff()
@@ -535,6 +551,14 @@ class Client:
             ) as exc:
                 self._connection._cancel_bootstrap()
                 self.dispatch('disconnect')
+                # The intents were refused (4013 invalid, 4014 not allowed):
+                # the same pass would be refused again, so give up.
+                if isinstance(exc, ConnectionClosed) and exc.code in (4013, 4014):
+                    await self.close()
+                    if exc.code == 4014:
+                        raise PrivilegedIntentsRequired(exc.shard_id) from None
+                    raise
+
                 if not reconnect:
                     await self.close()
                     if isinstance(exc, ConnectionClosed) and exc.code == 1000:
@@ -742,7 +766,7 @@ class Client:
 
     @property
     def intents(self) -> Intents:
-        """:class:`~bisim.Intents`: The intents configured for this connection (no effect on Bisim)."""
+        """:class:`~bisim.Intents`: The intents configured for this connection."""
         return self._connection.intents
 
     # helpers/getters
@@ -850,8 +874,24 @@ class Client:
         """
         return self._connection._get_sticker(id)
 
-    def get_soundboard_sound(self, id: int, /) -> None:
-        """Always ``None``: the library does not load sounds yet."""
+    def get_soundboard_sound(self, id: int, /) -> Optional[SoundboardSound]:
+        """Returns a soundboard sound with the given ID, if the library has seen it
+        (see :attr:`Guild.soundboard_sounds`).
+
+        Parameters
+        ----------
+        id: :class:`int`
+            The ID to search for.
+
+        Returns
+        --------
+        Optional[:class:`.SoundboardSound`]
+            The soundboard sound or ``None`` if not found.
+        """
+        for guild in self.guilds:
+            sound = guild.get_soundboard_sound(id)
+            if sound is not None:
+                return sound
         return None
 
     def get_all_channels(self) -> Generator[GuildChannel, None, None]:

@@ -287,10 +287,10 @@ class SelectOption:
 
 
 class SelectDefaultValue:
-    """Represents a select menu's default value.
+    """Represents a select menu's default value: what a user, role, mentionable
+    or channel select shows as picked when it is drawn.
 
-    Bisim's select menus do not take default values yet; the class is kept
-    so code that builds them still imports.
+    These can be created by users.
 
     Parameters
     -----------
@@ -302,24 +302,81 @@ class SelectDefaultValue:
 
     def __init__(self, *, id: int, type: SelectDefaultValueType) -> None:
         self.id: int = id
-        self.type: SelectDefaultValueType = type
+        self._type: SelectDefaultValueType = type
+
+    @property
+    def type(self) -> SelectDefaultValueType:
+        """:class:`SelectDefaultValueType`: The type of value that ``id`` represents."""
+        return self._type
+
+    @type.setter
+    def type(self, value: SelectDefaultValueType) -> None:
+        if not isinstance(value, SelectDefaultValueType):
+            raise TypeError(f'expected SelectDefaultValueType, received {value.__class__.__name__} instead')
+        self._type = value
 
     def __repr__(self) -> str:
         return f'<SelectDefaultValue id={self.id!r} type={self.type!r}>'
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, SelectDefaultValue) and int(self.id) == int(other.id) and self._type is other._type
+
+    def __hash__(self) -> int:
+        return hash((int(self.id), self._type))
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> SelectDefaultValue:
+        return cls(id=int(data['id']), type=try_enum(SelectDefaultValueType, data.get('type')))
+
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': str(self.id), 'type': self.type.value}
+        return {'id': str(self.id), 'type': self._type.value}
 
     @classmethod
     def from_channel(cls, channel: Any, /) -> Self:
+        """Creates a :class:`SelectDefaultValue` with the type set to :attr:`~SelectDefaultValueType.channel`.
+
+        Parameters
+        -----------
+        channel: :class:`~bisim.abc.Snowflake`
+            The channel to create the default value for.
+
+        Returns
+        --------
+        :class:`SelectDefaultValue`
+            The default value created with the channel.
+        """
         return cls(id=channel.id, type=SelectDefaultValueType.channel)
 
     @classmethod
     def from_role(cls, role: Any, /) -> Self:
+        """Creates a :class:`SelectDefaultValue` with the type set to :attr:`~SelectDefaultValueType.role`.
+
+        Parameters
+        -----------
+        role: :class:`~bisim.abc.Snowflake`
+            The role to create the default value for.
+
+        Returns
+        --------
+        :class:`SelectDefaultValue`
+            The default value created with the role.
+        """
         return cls(id=role.id, type=SelectDefaultValueType.role)
 
     @classmethod
     def from_user(cls, user: Any, /) -> Self:
+        """Creates a :class:`SelectDefaultValue` with the type set to :attr:`~SelectDefaultValueType.user`.
+
+        Parameters
+        -----------
+        user: :class:`~bisim.abc.Snowflake`
+            The user to create the default value for.
+
+        Returns
+        --------
+        :class:`SelectDefaultValue`
+            The default value created with the user.
+        """
         return cls(id=user.id, type=SelectDefaultValueType.user)
 
 
@@ -352,6 +409,9 @@ class SelectMenu(Component):
         Whether the select is disabled or not.
     channel_types: List[:class:`.ChannelType`]
         A list of channel types that are allowed to be chosen in this select menu.
+    default_values: List[:class:`.SelectDefaultValue`]
+        A list of values that are selected by default for select menus of type user, role,
+        mentionable and channel.
     id: Optional[:class:`int`]
         Always ``None`` on Bisim.
     """
@@ -381,7 +441,9 @@ class SelectMenu(Component):
         self.options: List[SelectOption] = [SelectOption.from_dict(option) for option in data.get('options', []) or []]
         self.disabled: bool = bool(data.get('disabled', False))
         self.channel_types: List[ChannelType] = [ChannelType.from_bisim(t) for t in data.get('channelTypes', []) or []]
-        self.default_values: List[SelectDefaultValue] = []
+        self.default_values: List[SelectDefaultValue] = [
+            SelectDefaultValue.from_dict(d) for d in data.get('defaultValues', []) or [] if isinstance(d, dict) and d.get('id')
+        ]
         self.required: bool = bool(data.get('required', True))
         self.id: Optional[int] = None
 
@@ -399,6 +461,8 @@ class SelectMenu(Component):
             payload['options'] = [op.to_dict() for op in self.options]
         if self.channel_types:
             payload['channelTypes'] = [t.bisim_name for t in self.channel_types if t.bisim_name]
+        if self.default_values:
+            payload['defaultValues'] = [v.to_dict() for v in self.default_values]
         return payload
 
 

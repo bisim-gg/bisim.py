@@ -101,9 +101,23 @@ class Setup(ui.View):
 `channel_types` منوی کانال را به چند نوع کانال محدود می‌کند: `ChannelType.text`، `ChannelType.voice` و
 `ChannelType.category` نوع‌هایی‌اند که بی‌سیم دارد. در پیام خصوصی، منوی کانال چیزی برای نشان دادن ندارد.
 
-!!! note "نکته"
-    دیسکورد اجازه می‌دهد این منوها از ابتدا چند عضو، نقش یا کانال انتخاب‌شده داشته باشند (`default_values`). بی‌سیم
-    این امکان را ندارد، پس دادن `default_values` خطای `bisim.NotSupported` می‌دهد.
+### شروع با انتخاب پیش‌فرض
+
+منوی کاربر، نقش، منشن‌پذیر یا کانال می‌تواند از ابتدا چند عضو، نقش یا کانال انتخاب‌شده داشته باشد:
+`default_values`، مثل discord.py. خود شیءها، `bisim.Object` (منوی منشن‌پذیر به `type=` آن نیاز دارد) یا
+`bisim.SelectDefaultValue` را بدهید. تعدادشان باید بین `min_values` و `max_values` باشد؛ منوی متنی به‌جای این،
+پیش‌فرض‌هایش را با `default=True` روی گزینه‌ها مشخص می‌کند.
+
+```python
+@ui.select(cls=ui.RoleSelect, placeholder='Roles that may post', max_values=3, default_values=[bisim.Object(id=ROLE_ID)])
+async def poster_roles(self, interaction: bisim.Interaction, select: ui.RoleSelect) -> None:
+    ...
+
+menu = ui.UserSelect(default_values=[interaction.user], max_values=5)
+menu.default_values  # [<SelectDefaultValue id=... type=<SelectDefaultValueType.user: 'user'>>]
+```
+
+منویی که از یک پیام خوانده شود آن‌ها را در `component.default_values` دارد.
 
 ## پاسخ به انتخاب
 

@@ -15,8 +15,9 @@ from .fake_bisim import TOKEN, FakeBisim
 
 
 class Recorder(bisim.Client):
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(intents=bisim.Intents.default(), **kwargs)
+    def __init__(self, *, intents: bisim.Intents = None, **kwargs: Any) -> None:
+        # Every intent by default (the privileged ones load members and presences).
+        super().__init__(intents=intents if intents is not None else bisim.Intents.all(), **kwargs)
         self.seen: List[tuple] = []
         self.waiters: Dict[str, asyncio.Event] = {}
 

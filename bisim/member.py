@@ -770,7 +770,7 @@ class Member(abc.Messageable, _UserTag):
                 fields['mute'] = bool(mute)
             if deafen is not utils.MISSING:
                 fields['deafen'] = bool(deafen)
-            await http.edit_voice_member(state.channel.id, self.id, **fields)
+            await http.edit_voice_member(state.channel.id, self.id, reason=reason, **fields)
 
         if voice_channel is not utils.MISSING:
             await self.move_to(voice_channel, reason=reason)
@@ -818,9 +818,9 @@ class Member(abc.Messageable, _UserTag):
         if state is None or state.channel is None:
             raise ClientException('Member is not connected to a voice channel.')
         if channel is None:
-            await self._state.http.disconnect_voice_member(state.channel.id, self.id)
+            await self._state.http.disconnect_voice_member(state.channel.id, self.id, reason=reason)
         else:
-            await self._state.http.move_voice_member(state.channel.id, self.id, channel.id)
+            await self._state.http.move_voice_member(state.channel.id, self.id, channel.id, reason=reason)
 
     async def timeout(
         self, until: Optional[Union[datetime.timedelta, datetime.datetime]], /, *, reason: Optional[str] = None

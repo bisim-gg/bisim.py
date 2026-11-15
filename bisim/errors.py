@@ -244,20 +244,35 @@ class ConnectionClosed(ClientException):
 
 
 class PrivilegedIntentsRequired(ClientException):
-    """Kept for compatibility with discord.py; never raised.
+    """Exception that's raised when the gateway is requesting privileged intents
+    but they're not ticked in the developer page yet.
 
-    Bisim has no privileged intents: what a bot sees is decided by its
-    permissions in each server.
+    Go to https://bisim.gg/developers, open your application, then **Bot**, and
+    switch on the intents the bot asks for under **Privileged Gateway Intents**.
+    Currently these are as follows:
+
+    - :attr:`Intents.members`
+    - :attr:`Intents.presences`
+    - :attr:`Intents.message_content`
+
+    From 100 servers on, Bisim must also approve each of them for the
+    application.
 
     Attributes
     -----------
     shard_id: Optional[:class:`int`]
-        Always ``None``.
+        Always ``None``: Bisim has no sharding.
     """
 
     def __init__(self, shard_id: Optional[int] = None):
         self.shard_id: Optional[int] = shard_id
-        super().__init__('Bisim has no privileged intents.')
+        msg = (
+            'The bot is requesting privileged intents that have not been explicitly enabled in the '
+            'developer portal. It is recommended to go to https://bisim.gg/developers, open your '
+            "application, then Bot, and explicitly enable the privileged intents under Privileged Gateway "
+            'Intents. If this is not possible, then consider disabling the privileged intents instead.'
+        )
+        super().__init__(msg)
 
 
 class InteractionResponded(ClientException):

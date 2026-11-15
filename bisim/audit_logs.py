@@ -47,8 +47,10 @@ _BISIM_ACTIONS: Dict[str, AuditLogAction] = {
     'WEBHOOK_UPDATE': AuditLogAction.webhook_update,
     'WEBHOOK_DELETE': AuditLogAction.webhook_delete,
     'EMOJI_CREATE': AuditLogAction.emoji_create,
+    'EMOJI_UPDATE': AuditLogAction.emoji_update,
     'EMOJI_DELETE': AuditLogAction.emoji_delete,
     'STICKER_CREATE': AuditLogAction.sticker_create,
+    'STICKER_UPDATE': AuditLogAction.sticker_update,
     'STICKER_DELETE': AuditLogAction.sticker_delete,
     'SOUND_CREATE': AuditLogAction.soundboard_sound_create,
     'SOUND_UPDATE': AuditLogAction.soundboard_sound_update,
@@ -105,7 +107,8 @@ class AuditLogChanges:
 class AuditLogEntry(Hashable):
     r"""Represents an Audit Log entry.
 
-    You retrieve these via :meth:`Guild.audit_logs`.
+    You retrieve these via :meth:`Guild.audit_logs`, and receive new ones in
+    :func:`on_audit_log_entry_create`.
 
     .. container:: operations
 
@@ -151,7 +154,8 @@ class AuditLogEntry(Hashable):
         self.bisim_action: str = data.get('action') or ''
         action = _BISIM_ACTIONS.get(self.bisim_action.upper())
         self.action: AuditLogAction = action if action is not None else try_enum(AuditLogAction, self.bisim_action)
-        self.user_id: Optional[int] = utils._snowflake(data.get('actorId'))
+        # REST gives ``actorId`` and ``meta``; GUILD_AUDIT_LOG_ENTRY_CREATE gives ``userId`` and ``metaJson``.
+        self.user_id: Optional[int] = utils._snowflake(data.get('actorId') or data.get('userId'))
         actor = data.get('actor')
         user: Optional[Union[User, Member]] = None
         if self.user_id is not None:
@@ -160,8 +164,13 @@ class AuditLogEntry(Hashable):
                 user = self._state.create_user(actor)
         self.user: Optional[Union[User, Member]] = user
         meta = data.get('meta')
+        if meta is None and data.get('metaJson'):
+            try:
+                meta = utils._from_json(data['metaJson'])
+            except ValueError:
+                meta = None
         self.extra: Any = meta
-        self.reason: Optional[str] = meta.get('reason') if isinstance(meta, dict) else None
+        self.reason: Optional[str] = (meta.get('reason') if isinstance(meta, dict) else None) or data.get('reason') or None
         self._target_type: Optional[str] = data.get('targetType')
         self._target_id: Optional[int] = utils._snowflake(data.get('targetId'))
         self._created_at = utils.parse_time(data.get('createdAt'))

@@ -51,6 +51,9 @@ __all__ = (
     'PollLayoutType',
     'ReactionType',
     'InviteType',
+    'AutoModRuleTriggerType',
+    'AutoModRuleEventType',
+    'AutoModRuleActionType',
     'try_enum',
 )
 
@@ -972,3 +975,62 @@ class PollLayoutType(Enum):
 class ReactionType(Enum):
     normal = 0
     burst = 1
+
+
+class AutoModRuleTriggerType(Enum):
+    """What an AutoMod rule looks for. Bisim's names map to Discord's numbers."""
+
+    keyword = 1
+    harmful_link = 2
+    spam = 3
+    keyword_preset = 4
+    mention_spam = 5
+    member_profile = 6
+
+    @classmethod
+    def from_bisim(cls, value: Any) -> 'AutoModRuleTriggerType':
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+            return try_enum(cls, int(value))
+        named = {
+            'KEYWORD': cls.keyword,
+            'SPAM': cls.spam,
+            'KEYWORD_PRESET': cls.keyword_preset,
+            'MENTION_SPAM': cls.mention_spam,
+        }
+        return named.get(str(value or '').upper(), cls.keyword)
+
+    def to_bisim(self) -> str:
+        return {
+            AutoModRuleTriggerType.spam: 'SPAM',
+            AutoModRuleTriggerType.keyword_preset: 'KEYWORD_PRESET',
+            AutoModRuleTriggerType.mention_spam: 'MENTION_SPAM',
+        }.get(self, 'KEYWORD')
+
+
+class AutoModRuleEventType(Enum):
+    """When an AutoMod rule runs. Bisim's names map to Discord's numbers."""
+
+    message_send = 1
+    member_update = 2
+
+    @classmethod
+    def from_bisim(cls, value: Any) -> 'AutoModRuleEventType':
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+            return try_enum(cls, int(value))
+        return cls.member_update if str(value or '').upper() == 'MEMBER_UPDATE' else cls.message_send
+
+    def to_bisim(self) -> str:
+        return 'MEMBER_UPDATE' if self is AutoModRuleEventType.member_update else 'MESSAGE_SEND'
+
+
+class AutoModRuleActionType(Enum):
+    """What an AutoMod rule does when it matches."""
+
+    block_message = 1
+    send_alert_message = 2
+    timeout = 3
+    block_member_interactions = 4

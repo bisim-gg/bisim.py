@@ -1,19 +1,23 @@
 """The REST client: one method per Bisim route, rate limits and retries.
 
-Bisim's REST answers with ``X-RateLimit-Limit`` and ``X-RateLimit-Remaining``
-and, when a limit is hit, a 429 whose body carries ``retryAfter`` in seconds
-(and usually a ``Retry-After`` header). Requests to the same route and major
-parameter (channel, server, webhook, interaction) are sent one at a time; a
-429 holds that route back for ``retryAfter`` seconds, and a 429 from the
-global limit (600 requests a minute per bot) pauses every request.
+Every Bisim answer carries Discord's rate limit headers: ``X-RateLimit-Limit``,
+``-Remaining``, ``-Reset`` (epoch seconds), ``-Reset-After`` (seconds) and
+``-Bucket`` (an opaque name). As in discord.py, the library learns which bucket
+each route is counted in and keeps one queue per bucket: it sends as many
+requests at once as the bucket has room for, and when ``Remaining`` reaches 0
+the next request waits ``Reset-After`` seconds instead of meeting a 429. A 429
+still happens (another process using the same token, say): its body carries
+``retryAfter``, and one with ``X-RateLimit-Global: true`` (the bot's whole
+budget, not one route's) pauses every request.
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import sys
-import weakref
+from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -140,6 +144,177 @@ def _ws_timeout(seconds: float) -> Any:
     return timeout_cls(ws_close=seconds)
 
 
+def _header_float(headers: Any, name: str) -> Optional[float]:
+    value = headers.get(name)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+class Ratelimit:
+    """One of Bisim's rate limit buckets, as its ``X-RateLimit`` headers describe it.
+
+    Adapted from discord.py's: it works like a semaphore that knows the size of
+    the bucket's window and how much of it is left, so requests sharing a
+    bucket go out together while there is room, and the next one waits for
+    the window to reset once ``Remaining`` is 0.
+    """
+
+    __slots__ = (
+        'limit',
+        'remaining',
+        'outgoing',
+        'reset_after',
+        'expires',
+        'dirty',
+        '_last_request',
+        '_max_ratelimit_timeout',
+        '_loop',
+        '_pending_requests',
+        '_sleeping',
+    )
+
+    def __init__(self, max_ratelimit_timeout: Optional[float]) -> None:
+        self.limit: int = 1
+        self.remaining: int = self.limit
+        self.outgoing: int = 0
+        self.reset_after: float = 0.0
+        self.expires: Optional[float] = None
+        self.dirty: bool = False
+        self._max_ratelimit_timeout: Optional[float] = max_ratelimit_timeout
+        self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        self._pending_requests: deque[asyncio.Future[Any]] = deque()
+        # Only one waiter sleeps for the window; it wakes the others when it ends.
+        self._sleeping: asyncio.Lock = asyncio.Lock()
+        self._last_request: float = self._loop.time()
+
+    def __repr__(self) -> str:
+        return f'<RateLimitBucket limit={self.limit} remaining={self.remaining} pending_requests={len(self._pending_requests)}>'
+
+    def reset(self) -> None:
+        self.remaining = self.limit - self.outgoing
+        self.expires = None
+        self.reset_after = 0.0
+        self.dirty = False
+
+    def update(self, response: Any, *, use_clock: bool = False) -> None:
+        headers = response.headers
+        limit = _header_float(headers, 'X-RateLimit-Limit')
+        remaining = _header_float(headers, 'X-RateLimit-Remaining')
+        if limit is None or remaining is None:
+            return
+        self.limit = max(1, int(limit))
+        if self.dirty:
+            self.remaining = min(int(remaining), self.limit - self.outgoing)
+        else:
+            self.remaining = int(remaining)
+            self.dirty = True
+
+        reset_after = _header_float(headers, 'X-RateLimit-Reset-After')
+        reset = _header_float(headers, 'X-RateLimit-Reset')
+        if (use_clock or reset_after is None) and reset is not None:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            reset_at = datetime.datetime.fromtimestamp(reset, datetime.timezone.utc)
+            reset_after = (reset_at - now).total_seconds()
+        if reset_after is None:
+            # An answer without a reset time (an older server): nothing to wait for.
+            self.reset_after = 0.0
+            self.expires = None
+            return
+        self.reset_after = max(0.0, reset_after)
+        self.expires = self._loop.time() + self.reset_after
+
+    def _wake_next(self) -> None:
+        while self._pending_requests:
+            future = self._pending_requests.popleft()
+            if not future.done():
+                future.set_result(None)
+                break
+
+    def _wake(self, count: int = 1, *, exception: Optional[RateLimited] = None) -> None:
+        awaken = 0
+        while self._pending_requests:
+            future = self._pending_requests.popleft()
+            if not future.done():
+                if exception:
+                    future.set_exception(exception)
+                else:
+                    future.set_result(None)
+                awaken += 1
+
+            if awaken >= count:
+                break
+
+    async def _refresh(self) -> None:
+        error = self._max_ratelimit_timeout and self.reset_after > self._max_ratelimit_timeout
+        exception = RateLimited(self.reset_after) if error else None
+        async with self._sleeping:
+            if not error and self.reset_after > 0:
+                await asyncio.sleep(self.reset_after)
+
+        self.reset()
+        self._wake(self.remaining, exception=exception)
+
+    def is_expired(self) -> bool:
+        return self.expires is not None and self._loop.time() > self.expires
+
+    def is_inactive(self) -> bool:
+        delta = self._loop.time() - self._last_request
+        return delta >= 300 and self.outgoing == 0 and len(self._pending_requests) == 0
+
+    async def acquire(self) -> None:
+        self._last_request = self._loop.time()
+        if self.is_expired():
+            self.reset()
+
+        if self._max_ratelimit_timeout is not None and self.expires is not None:
+            # A wait longer than the caller accepts is refused before anything is sent.
+            current_reset_after = self.expires - self._loop.time()
+            if current_reset_after > self._max_ratelimit_timeout:
+                raise RateLimited(current_reset_after)
+
+        while self.remaining <= 0:
+            future = self._loop.create_future()
+            self._pending_requests.append(future)
+            try:
+                while not future.done():
+                    # 30 is the smallest max_ratelimit_timeout allowed.
+                    max_wait_time = self.expires - self._loop.time() if self.expires else 30
+                    await asyncio.wait([future], timeout=max(0.0, max_wait_time))
+                    if not future.done():
+                        await self._refresh()
+            except BaseException:
+                future.cancel()
+                if self.remaining > 0 and not future.cancelled():
+                    self._wake_next()
+                raise
+
+        self.remaining -= 1
+        self.outgoing += 1
+
+    async def __aenter__(self) -> Ratelimit:
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        self.outgoing -= 1
+        tokens = self.remaining - self.outgoing
+        # Whether the bucket must be waited out now, before the next request.
+        if not self._sleeping.locked():
+            if tokens <= 0:
+                await self._refresh()
+            elif self._pending_requests:
+                exception = (
+                    RateLimited(self.reset_after)
+                    if self._max_ratelimit_timeout and self.reset_after > self._max_ratelimit_timeout
+                    else None
+                )
+                self._wake(tokens, exception=exception)
+
+
 class _ResponseLike:
     """Stands in for a response when an error is raised without one."""
 
@@ -169,7 +344,11 @@ class HTTPClient:
         self.loop: Optional[asyncio.AbstractEventLoop] = loop
         self.connector: Optional[aiohttp.BaseConnector] = connector
         self.__session: aiohttp.ClientSession = utils.MISSING
-        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+        # Route key -> the bucket Bisim named for it (X-RateLimit-Bucket).
+        self._bucket_hashes: Dict[str, str] = {}
+        # Bucket name -> its rate limit; or, before a route's bucket is known,
+        # "route key:major parameters" -> a one-at-a-time stand-in.
+        self._buckets: Dict[str, Ratelimit] = {}
         self._global_over: Optional[asyncio.Event] = None
         self.token: Optional[str] = None
         self.proxy: Optional[str] = proxy
@@ -238,12 +417,43 @@ class HTTPClient:
     # The request loop
     # ------------------------------------------------------------------
 
-    def _lock_for(self, bucket: str) -> asyncio.Lock:
-        lock = self._locks.get(bucket)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._locks[bucket] = lock
-        return lock
+    def _try_clear_expired_ratelimits(self) -> None:
+        if len(self._buckets) < 256:
+            return
+        for key in [key for key, bucket in self._buckets.items() if bucket.is_inactive()]:
+            del self._buckets[key]
+
+    def get_ratelimit(self, key: str) -> Ratelimit:
+        try:
+            value = self._buckets[key]
+        except KeyError:
+            self._buckets[key] = value = Ratelimit(self.max_ratelimit_timeout)
+            self._try_clear_expired_ratelimits()
+        return value
+
+    def _learn_bucket(self, route: Route, key: str, ratelimit: Ratelimit, bisim_hash: str) -> Ratelimit:
+        """Records which bucket a route is counted in; returns the rate limit that follows it.
+
+        Bisim's bucket name already says whose budget it is (the bot's whole
+        budget, or one route's own), so routes that share a name share one
+        queue, whatever channel or server they name.
+        """
+        previous = self._bucket_hashes.get(route.key)
+        if previous == bisim_hash:
+            return ratelimit
+        if previous is not None:
+            _log.debug('A route (%s) has changed buckets: %s -> %s.', route.key, previous, bisim_hash)
+        else:
+            _log.debug('%s has found its rate limit bucket (%s).', route.key, bisim_hash)
+        self._bucket_hashes[route.key] = bisim_hash
+        shared = self._buckets.get(bisim_hash)
+        if shared is None:
+            self._buckets[bisim_hash] = ratelimit
+            shared = ratelimit
+        if previous is None and key != bisim_hash:
+            # The one-at-a-time stand-in is no longer needed; other routes may still share the old name.
+            self._buckets.pop(key, None)
+        return shared
 
     @staticmethod
     def _retry_after(response: Any, data: Any) -> float:
@@ -264,11 +474,7 @@ class HTTPClient:
         headers = response.headers
         if (headers.get('X-RateLimit-Global') or '').lower() == 'true':
             return True
-        if (headers.get('X-RateLimit-Scope') or '').lower() == 'global':
-            return True
-        # The global limiter answers with its own counters at zero; a route's
-        # own limit is hit while the global one still has room left.
-        return headers.get('X-RateLimit-Remaining') == '0' and isinstance(data, dict) and data.get('code') == 'RATE_LIMITED'
+        return (headers.get('X-RateLimit-Scope') or '').lower() == 'global'
 
     async def request(
         self,
@@ -304,13 +510,16 @@ class HTTPClient:
         if params:
             params = {k: (str(v).lower() if isinstance(v, bool) else str(v)) for k, v in params.items() if v is not None}
 
+        bisim_hash = self._bucket_hashes.get(route.key)
+        key = bisim_hash if bisim_hash is not None else f'{route.key}:{route.major_parameters}'
+        ratelimit = self.get_ratelimit(key)
+
         if not global_over.is_set():
             await global_over.wait()
 
-        lock = self._lock_for(route.bucket)
         response: Optional[aiohttp.ClientResponse] = None
         data: Any = None
-        async with lock:
+        async with ratelimit:
             for tries in range(self.max_retries):
                 request_body: Any = body
                 if form is not None:
@@ -330,6 +539,21 @@ class HTTPClient:
                     ) as response:
                         _log.debug('%s %s with %s has returned %s', method, url, body, response.status)
                         data = await json_or_text(response)
+
+                        # Which bucket this route is counted in, and how much of it is left.
+                        bucket_name = response.headers.get('X-RateLimit-Bucket')
+                        if bucket_name:
+                            learned = self._learn_bucket(route, key, ratelimit, bucket_name)
+                            if learned is not ratelimit and response.status != 429:
+                                learned.update(response, use_clock=self.use_clock)
+                        if response.status != 429 and 'X-RateLimit-Remaining' in response.headers:
+                            ratelimit.update(response, use_clock=self.use_clock)
+                            if ratelimit.remaining == 0:
+                                _log.debug(
+                                    'A rate limit bucket (%s) has been used up. Waiting %.2f seconds before the next request.',
+                                    bucket_name or route.key,
+                                    ratelimit.reset_after,
+                                )
 
                         if 300 > response.status >= 200:
                             _log.debug('%s %s has received %s', method, url, data)
@@ -471,6 +695,24 @@ class HTTPClient:
     def get_user(self, user_id: Any) -> Coroutine[Any, Any, Any]:
         return self.request(Route('GET', '/users/{user_id}', user_id=_snowflake_str(user_id)))
 
+    def _picture_form(self, data: bytes, content_type: str, name: str) -> List[Dict[str, Any]]:
+        extension = content_type.split('/')[-1] or 'png'
+        return [{'name': 'file', 'value': data, 'filename': f'{name}.{extension}', 'content_type': content_type}]
+
+    def edit_my_avatar(self, data: bytes, content_type: str) -> Coroutine[Any, Any, Any]:
+        """The bot's own picture (multipart field ``file``)."""
+        return self.request(Route('POST', '/users/@me/avatar'), form=self._picture_form(data, content_type, 'avatar'))
+
+    def delete_my_avatar(self) -> Coroutine[Any, Any, Any]:
+        return self.request(Route('DELETE', '/users/@me/avatar'))
+
+    def edit_my_banner(self, data: bytes, content_type: str) -> Coroutine[Any, Any, Any]:
+        """The bot's own banner (multipart field ``file``)."""
+        return self.request(Route('POST', '/users/@me/banner'), form=self._picture_form(data, content_type, 'banner'))
+
+    def delete_my_banner(self) -> Coroutine[Any, Any, Any]:
+        return self.request(Route('DELETE', '/users/@me/banner'))
+
     def get_client_config(self) -> Coroutine[Any, Any, Any]:
         return self.request(Route('GET', '/client-config'))
 
@@ -478,9 +720,12 @@ class HTTPClient:
     # Gateway
     # ------------------------------------------------------------------
 
-    def get_bot_gateway(self, application_id: Any) -> Coroutine[Any, Any, Any]:
-        """Mints a gateway pass: ``{token, expiresInMs}``."""
-        return self.request(Route('POST', '/applications/{application_id}/gateway', application_id=_snowflake_str(application_id)))
+    def get_bot_gateway(self, application_id: Any, intents: Optional[int] = None) -> Coroutine[Any, Any, Any]:
+        """Mints a gateway pass for these intents: ``{token, expiresInMs, intents}``."""
+        r = Route('POST', '/applications/{application_id}/gateway', application_id=_snowflake_str(application_id))
+        if intents is None:
+            return self.request(r)
+        return self.request(r, json={'intents': int(intents)})
 
     # ------------------------------------------------------------------
     # Guilds
@@ -505,6 +750,35 @@ class HTTPClient:
         if limit is not None:
             params['limit'] = limit
         return self.request(Route('GET', '/guilds/{guild_id}/audit-log', guild_id=_snowflake_str(guild_id)), params=params)
+
+    def get_auto_moderation_rules(self, guild_id: Any) -> Coroutine[Any, Any, Any]:
+        return self.request(Route('GET', '/guilds/{guild_id}/automod/rules', guild_id=_snowflake_str(guild_id)))
+
+    def create_auto_moderation_rule(
+        self, guild_id: Any, *, reason: Optional[str] = None, **fields: Any
+    ) -> Coroutine[Any, Any, Any]:
+        r = Route('POST', '/guilds/{guild_id}/automod/rules', guild_id=_snowflake_str(guild_id))
+        return self.request(r, json=fields, reason=reason)
+
+    def get_auto_moderation_rule(self, guild_id: Any, rule_id: Any) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'GET', '/guilds/{guild_id}/automod/rules/{rule_id}', guild_id=_snowflake_str(guild_id), rule_id=_snowflake_str(rule_id)
+        )
+        return self.request(r)
+
+    def edit_auto_moderation_rule(
+        self, guild_id: Any, rule_id: Any, *, reason: Optional[str] = None, **fields: Any
+    ) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'PATCH', '/guilds/{guild_id}/automod/rules/{rule_id}', guild_id=_snowflake_str(guild_id), rule_id=_snowflake_str(rule_id)
+        )
+        return self.request(r, json=fields, reason=reason)
+
+    def delete_auto_moderation_rule(self, guild_id: Any, rule_id: Any, *, reason: Optional[str] = None) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'DELETE', '/guilds/{guild_id}/automod/rules/{rule_id}', guild_id=_snowflake_str(guild_id), rule_id=_snowflake_str(rule_id)
+        )
+        return self.request(r, reason=reason)
 
     # ------------------------------------------------------------------
     # Channels
@@ -702,6 +976,19 @@ class HTTPClient:
         r = Route('DELETE', '/guilds/{guild_id}/bans/{user_id}', guild_id=_snowflake_str(guild_id), user_id=_snowflake_str(user_id))
         return self.request(r, reason=reason)
 
+    def bulk_ban(
+        self, guild_id: Any, user_ids: Sequence[Any], delete_message_seconds: int = 86400, *, reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
+        """``{bannedUsers, failedUsers}``; a 400 ``BULK_BAN_FAILED`` when nobody was banned."""
+        r = Route('POST', '/guilds/{guild_id}/bulk-ban', guild_id=_snowflake_str(guild_id))
+        payload: Dict[str, Any] = {
+            'userIds': [_snowflake_str(u) for u in user_ids],
+            'deleteMessageSeconds': int(delete_message_seconds),
+        }
+        if reason:
+            payload['reason'] = reason
+        return self.request(r, json=payload, reason=reason)
+
     # ------------------------------------------------------------------
     # Invites
     # ------------------------------------------------------------------
@@ -754,6 +1041,12 @@ class HTTPClient:
         r = Route('DELETE', '/guilds/{guild_id}/emojis/{emoji_id}', guild_id=_snowflake_str(guild_id), emoji_id=_snowflake_str(emoji_id))
         return self.request(r, reason=reason)
 
+    def edit_custom_emoji(
+        self, guild_id: Any, emoji_id: Any, *, payload: Dict[str, Any], reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
+        r = Route('PATCH', '/guilds/{guild_id}/emojis/{emoji_id}', guild_id=_snowflake_str(guild_id), emoji_id=_snowflake_str(emoji_id))
+        return self.request(r, json=payload, reason=reason)
+
     def get_all_guild_stickers(self, guild_id: Any) -> Coroutine[Any, Any, Any]:
         return self.request(Route('GET', '/guilds/{guild_id}/stickers', guild_id=_snowflake_str(guild_id)))
 
@@ -771,6 +1064,14 @@ class HTTPClient:
             'DELETE', '/guilds/{guild_id}/stickers/{sticker_id}', guild_id=_snowflake_str(guild_id), sticker_id=_snowflake_str(sticker_id)
         )
         return self.request(r, reason=reason)
+
+    def modify_guild_sticker(
+        self, guild_id: Any, sticker_id: Any, payload: Dict[str, Any], *, reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'PATCH', '/guilds/{guild_id}/stickers/{sticker_id}', guild_id=_snowflake_str(guild_id), sticker_id=_snowflake_str(sticker_id)
+        )
+        return self.request(r, json=payload, reason=reason)
 
     def get_soundboard_sounds(self, guild_id: Any) -> Coroutine[Any, Any, Any]:
         return self.request(Route('GET', '/guilds/{guild_id}/sounds', guild_id=_snowflake_str(guild_id)))
@@ -806,6 +1107,56 @@ class HTTPClient:
         params = {'wait': 'true'} if wait else None
         return self.request(r, json=payload, params=params, auth=False)
 
+    def edit_webhook_avatar(
+        self, webhook_id: Any, data: bytes, content_type: str, *, reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
+        """The webhook's stored picture (multipart field ``file``, Manage Webhooks): the webhook back."""
+        r = Route('POST', '/webhooks/{webhook_id}/avatar', webhook_id=_snowflake_str(webhook_id))
+        return self.request(r, form=self._picture_form(data, content_type, 'avatar'), reason=reason)
+
+    def delete_webhook_avatar(self, webhook_id: Any, *, reason: Optional[str] = None) -> Coroutine[Any, Any, Any]:
+        r = Route('DELETE', '/webhooks/{webhook_id}/avatar', webhook_id=_snowflake_str(webhook_id))
+        return self.request(r, reason=reason)
+
+    def create_webhook_attachments(self, webhook_id: Any, token: str, files: List[Dict[str, Any]]) -> Coroutine[Any, Any, Any]:
+        """Upload addresses for a webhook's message files, minted with its token."""
+        r = Route(
+            'POST', '/webhooks/{webhook_id}/{webhook_token}/attachments', webhook_id=_snowflake_str(webhook_id), webhook_token=token
+        )
+        return self.request(r, json={'files': files}, auth=False)
+
+    def get_webhook_message(self, webhook_id: Any, token: str, message_id: Any) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'GET',
+            '/webhooks/{webhook_id}/{webhook_token}/messages/{message_id}',
+            webhook_id=_snowflake_str(webhook_id),
+            webhook_token=token,
+            message_id=_snowflake_str(message_id),
+        )
+        return self.request(r, auth=False)
+
+    def edit_webhook_message(
+        self, webhook_id: Any, token: str, message_id: Any, payload: Dict[str, Any]
+    ) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'PATCH',
+            '/webhooks/{webhook_id}/{webhook_token}/messages/{message_id}',
+            webhook_id=_snowflake_str(webhook_id),
+            webhook_token=token,
+            message_id=_snowflake_str(message_id),
+        )
+        return self.request(r, json=payload, auth=False)
+
+    def delete_webhook_message(self, webhook_id: Any, token: str, message_id: Any) -> Coroutine[Any, Any, Any]:
+        r = Route(
+            'DELETE',
+            '/webhooks/{webhook_id}/{webhook_token}/messages/{message_id}',
+            webhook_id=_snowflake_str(webhook_id),
+            webhook_token=token,
+            message_id=_snowflake_str(message_id),
+        )
+        return self.request(r, auth=False)
+
     # ------------------------------------------------------------------
     # Voice: the bot's own connection
     # ------------------------------------------------------------------
@@ -832,6 +1183,13 @@ class HTTPClient:
         r = Route('POST', '/channels/{channel_id}/soundboard/play', channel_id=_snowflake_str(channel_id))
         return self.request(r, json={'soundId': _snowflake_str(sound_id)})
 
+    def edit_voice_channel_status(
+        self, channel_id: Any, status: Optional[str], *, reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
+        """A voice channel's status line (empty clears it): ``{channelId, status}``."""
+        r = Route('PUT', '/channels/{channel_id}/voice-status', channel_id=_snowflake_str(channel_id))
+        return self.request(r, json={'status': status or ''}, reason=reason)
+
     # ------------------------------------------------------------------
     # Voice moderation
     # ------------------------------------------------------------------
@@ -842,26 +1200,30 @@ class HTTPClient:
     def get_guild_voice_states(self, guild_id: Any) -> Coroutine[Any, Any, Any]:
         return self.request(Route('GET', '/guilds/{guild_id}/voice-states', guild_id=_snowflake_str(guild_id)))
 
-    def edit_voice_member(self, channel_id: Any, user_id: Any, **fields: Any) -> Coroutine[Any, Any, Any]:
+    def edit_voice_member(
+        self, channel_id: Any, user_id: Any, *, reason: Optional[str] = None, **fields: Any
+    ) -> Coroutine[Any, Any, Any]:
         r = Route(
             'PATCH', '/channels/{channel_id}/voice/members/{user_id}', channel_id=_snowflake_str(channel_id), user_id=_snowflake_str(user_id)
         )
-        return self.request(r, json=fields)
+        return self.request(r, json=fields, reason=reason)
 
-    def move_voice_member(self, channel_id: Any, user_id: Any, target_channel_id: Any) -> Coroutine[Any, Any, Any]:
+    def move_voice_member(
+        self, channel_id: Any, user_id: Any, target_channel_id: Any, *, reason: Optional[str] = None
+    ) -> Coroutine[Any, Any, Any]:
         r = Route(
             'POST',
             '/channels/{channel_id}/voice/members/{user_id}/move',
             channel_id=_snowflake_str(channel_id),
             user_id=_snowflake_str(user_id),
         )
-        return self.request(r, json={'channelId': _snowflake_str(target_channel_id)})
+        return self.request(r, json={'channelId': _snowflake_str(target_channel_id)}, reason=reason)
 
-    def disconnect_voice_member(self, channel_id: Any, user_id: Any) -> Coroutine[Any, Any, Any]:
+    def disconnect_voice_member(self, channel_id: Any, user_id: Any, *, reason: Optional[str] = None) -> Coroutine[Any, Any, Any]:
         r = Route(
             'DELETE', '/channels/{channel_id}/voice/members/{user_id}', channel_id=_snowflake_str(channel_id), user_id=_snowflake_str(user_id)
         )
-        return self.request(r)
+        return self.request(r, reason=reason)
 
     # ------------------------------------------------------------------
     # Messages
@@ -969,6 +1331,17 @@ class HTTPClient:
             '/channels/{channel_id}/messages/{message_id}/reactions',
             channel_id=_snowflake_str(channel_id),
             message_id=_snowflake_str(message_id),
+        )
+        return self.request(r)
+
+    def clear_single_reaction(self, channel_id: Any, message_id: Any, emoji: str) -> Coroutine[Any, Any, Any]:
+        # The path ends in /all: Bisim's .../reactions/{emoji} removes the caller's own.
+        r = Route(
+            'DELETE',
+            '/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/all',
+            channel_id=_snowflake_str(channel_id),
+            message_id=_snowflake_str(message_id),
+            emoji=emoji,
         )
         return self.request(r)
 
@@ -1132,6 +1505,18 @@ class HTTPClient:
         if data is not None:
             payload['data'] = data
         return self.request(r, json=payload, auth=False)
+
+    def create_interaction_attachments(
+        self, interaction_id: Any, token: str, files: List[Dict[str, Any]]
+    ) -> Coroutine[Any, Any, Any]:
+        """Upload addresses for the files of an interaction's answers, minted with its token."""
+        r = Route(
+            'POST',
+            '/interactions/{interaction_id}/{interaction_token}/attachments',
+            interaction_id=_snowflake_str(interaction_id),
+            interaction_token=token,
+        )
+        return self.request(r, json={'files': files}, auth=False)
 
     def get_original_interaction_response(self, interaction_id: Any, token: str) -> Coroutine[Any, Any, Any]:
         r = Route(

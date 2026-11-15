@@ -33,13 +33,24 @@ from typing import (
 
 from . import utils
 from .activity import BaseActivity, CustomActivity
-from .channel import DMChannel, GroupChannel, PartialMessageable, TextChannel, VoiceChannel, _private_channel_factory
+from .audit_logs import AuditLogEntry
+from .automod import AutoModAction, AutoModRule
+from .channel import (
+    DMChannel,
+    GroupChannel,
+    PartialMessageable,
+    TextChannel,
+    VoiceChannel,
+    _guild_channel_factory,
+    _private_channel_factory,
+)
 from .emoji import Emoji
 from .enums import ChannelType, InteractionType, Status, try_enum
 from .errors import Forbidden, HTTPException, NotFound
 from .flags import Intents, MemberCacheFlags
 from .guild import Guild
 from .interactions import Interaction
+from .invite import Invite
 from .member import Member
 from .message import Message
 from .partial_emoji import PartialEmoji
@@ -51,10 +62,12 @@ from .raw_models import (
     RawPollVoteActionEvent,
     RawPresenceUpdateEvent,
     RawReactionActionEvent,
+    RawReactionClearEmojiEvent,
     RawReactionClearEvent,
     RawTypingEvent,
 )
 from .role import Role
+from .soundboard import SoundboardSound
 from .sticker import GuildSticker
 from .ui.modal import _modal_fields
 from .ui.view import View, ViewStore
@@ -125,7 +138,6 @@ class ConnectionState:
             raise ValueError('guild_ready_timeout cannot be negative')
 
         self.allowed_mentions: Any = options.get('allowed_mentions')
-        self._chunk_guilds: bool = options.get('chunk_guilds_at_startup', True)
 
         activity = options.get('activity', None)
         if activity is not None and not isinstance(activity, BaseActivity):
@@ -141,6 +153,11 @@ class ConnectionState:
         if intents is not None and intents is not utils.MISSING and not isinstance(intents, Intents):
             raise TypeError(f'intents parameter must be Intent not {type(intents)!r}')
         self._intents: Intents = intents if isinstance(intents, Intents) else Intents.default()
+
+        # Bisim refuses the full member list without the members intent, as Discord refuses to chunk.
+        self._chunk_guilds: bool = options.get('chunk_guilds_at_startup', self._intents.members)
+        if not self._intents.members and self._chunk_guilds:
+            raise ValueError('Intents.members must be enabled to chunk guilds at startup.')
 
         cache_flags = options.get('member_cache_flags', None)
         self.member_cache_flags: MemberCacheFlags = cache_flags if cache_flags is not None else MemberCacheFlags.all()
@@ -178,6 +195,8 @@ class ConnectionState:
         self._voice_clients: Dict[int, VoiceProtocol] = {}
         # Presence snapshots that arrive before a server's members are loaded.
         self._pending_presences: Dict[int, List[Dict[str, Any]]] = {}
+        # Channels CHANNEL_CREATE added, per server: the GUILD_RESYNC that follows must not report them again.
+        self._fresh_channels: Dict[int, Set[int]] = {}
         self._ready_state_done: bool = False
         if self.max_messages is not None:
             self._messages: Optional[Deque[Message]] = deque(maxlen=self.max_messages)
@@ -595,6 +614,10 @@ class ConnectionState:
         return guild
 
     async def _subscribe(self, ws: BisimWebSocket, guild_id: int) -> bool:
+        if not self._intents.presences:
+            # Without the presences intent the gateway sends no snapshot to wait for.
+            await ws.subscribe_guild(guild_id)
+            return True
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         self._subscribe_waiters[guild_id] = future
@@ -623,11 +646,15 @@ class ConnectionState:
         role_before = {rid: (copy.copy(r), _role_signature(r)) for rid, r in old_roles.items()}
 
         guild._from_data(detail)
+        # Channels that CHANNEL_CREATE already reported: their first refetch only fills them in.
+        fresh = self._fresh_channels.pop(guild.id, set())
 
         if not dispatch:
             return
 
         for channel_id, channel in guild._channels.items():
+            if channel_id in fresh:
+                continue
             previous = channel_before.get(channel_id)
             if previous is None:
                 self.dispatch('guild_channel_create', channel)
@@ -886,6 +913,26 @@ class ConnectionState:
             message.reactions.clear()
             self.dispatch('reaction_clear', message, old_reactions)
 
+    def parse_message_reaction_remove_emoji(self, data: Dict[str, Any]) -> None:
+        # Every reaction of one emoji on a message is gone (Message.clear_reaction).
+        payload = self._reaction_payload(data, 'reactionRemoveEmoji')
+        if payload is None:
+            return
+        partial = PartialEmoji.from_str(payload.get('emoji') or '')
+        emoji = PartialEmoji.with_state(self, name=partial.name, animated=partial.animated, id=partial.id)
+        raw = RawReactionClearEmojiEvent(payload, emoji)
+        self.dispatch('raw_reaction_clear_emoji', raw)
+
+        message = self._get_message(raw.message_id)
+        if message is not None:
+            try:
+                reaction = message._clear_emoji(self._upgrade_partial_emoji(emoji))
+            except (AttributeError, ValueError):
+                pass
+            else:
+                if reaction:
+                    self.dispatch('reaction_clear_emoji', reaction)
+
     def parse_message_poll_vote(self, data: Dict[str, Any]) -> None:
         payload = data.get('pollVote')
         if not isinstance(payload, dict) or not payload.get('messageId') or not payload.get('userId'):
@@ -1043,6 +1090,43 @@ class ConnectionState:
         channel._update_from_event(payload)
         self.dispatch('guild_channel_update', old_channel, channel)
 
+    def parse_channel_create(self, data: Dict[str, Any]) -> None:
+        payload = data.get('channelUpdate') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        channel_id = utils._snowflake(payload.get('id') or data.get('channelId'))
+        if guild is None or channel_id is None:
+            _log.debug('CHANNEL_CREATE referencing an unknown guild or channel. Discarding.')
+            return
+        if guild.get_channel(channel_id) is not None:
+            # A GUILD_RESYNC that came first already reported it.
+            return
+        cls, _ = _guild_channel_factory(payload.get('type'))
+        if cls is None:
+            _log.debug('CHANNEL_CREATE with an unknown channel type %r. Discarding.', payload.get('type'))
+            return
+        channel_data = dict(payload)
+        channel_data.setdefault('guildId', str(guild.id))
+        channel = cls(state=self, guild=guild, data=channel_data)
+        guild._add_channel(channel)
+        self._fresh_channels.setdefault(guild.id, set()).add(channel.id)
+        self.dispatch('guild_channel_create', channel)
+
+    def parse_channel_delete(self, data: Dict[str, Any]) -> None:
+        payload = data.get('channelUpdate') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        channel_id = utils._snowflake(payload.get('id') or data.get('channelId'))
+        if guild is None or channel_id is None:
+            return
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            # Already gone: a GUILD_RESYNC that came first reported it.
+            return
+        guild._remove_channel(channel)
+        fresh = self._fresh_channels.get(guild.id)
+        if fresh is not None:
+            fresh.discard(channel_id)
+        self.dispatch('guild_channel_delete', channel)
+
     def parse_guild_role_create(self, data: Dict[str, Any]) -> None:
         guild = self._get_guild(utils._snowflake(data.get('guildId')))
         role_data = (data.get('guildRole') or {}).get('role') or {}
@@ -1139,25 +1223,38 @@ class ConnectionState:
     def parse_guild_member_remove(self, data: Dict[str, Any]) -> None:
         guild_id = utils._snowflake(data.get('guildId'))
         guild = self._get_guild(guild_id)
-        user_id = utils._snowflake((data.get('guildMemberRemove') or {}).get('userId'))
+        payload = data.get('guildMemberRemove') or {}
+        user_data = payload.get('user') if isinstance(payload.get('user'), dict) else None
+        user_id = utils._snowflake(payload.get('userId') or (user_data or {}).get('id'))
         if guild is None or user_id is None:
             return
         if user_id == self.self_id:
             self._remove_guild(guild)
             self.dispatch('guild_remove', guild)
             return
-        member = guild.get_member(user_id)
-        user: Union[User, Member]
-        if member is not None:
-            guild._remove_member(member)
-            if guild._member_count is not None:
-                guild._member_count = max(guild._member_count - 1, 0)
-            user = member
-            self.dispatch('member_remove', member)
+        # Who left, as Bisim sends it: the user is known even when the member was not cached.
+        user: User
+        if user_data and user_data.get('id'):
+            user = self.store_user(user_data)
         else:
             user = self.get_user(user_id) or self.create_user({'id': user_id, 'username': ''})
+        raw = RawMemberRemoveEvent(guild.id, user)
+        member = guild.get_member(user_id)
+        if member is not None:
+            guild._remove_member(member)
+            raw.user = member
+        else:
+            # Not cached: a member built from the user, without roles or a join date.
+            member = Member(
+                data={'userId': str(user_id), 'user': user._to_minimal_user_json(), 'roleIds': []},
+                guild=guild,
+                state=self,
+            )
+        if guild._member_count is not None:
+            guild._member_count = max(guild._member_count - 1, 0)
         guild._voice_states.pop(user_id, None)
-        self.dispatch('raw_member_remove', RawMemberRemoveEvent(guild.id, user))
+        self.dispatch('member_remove', member)
+        self.dispatch('raw_member_remove', raw)
 
     def parse_guild_emoji_create(self, data: Dict[str, Any]) -> None:
         emoji_data = data.get('emoji') or {}
@@ -1167,6 +1264,20 @@ class ConnectionState:
         before = guild.emojis
         emoji = self.store_emoji(guild, emoji_data)
         guild.emojis = tuple(e for e in before if e.id != emoji.id) + (emoji,)
+        self.dispatch('guild_emojis_update', guild, before, guild.emojis)
+
+    def parse_guild_emoji_update(self, data: Dict[str, Any]) -> None:
+        # A renamed emoji: the row's current state, in GUILD_EMOJI_CREATE's payload.
+        emoji_data = data.get('emoji') or {}
+        guild = self._get_guild(utils._snowflake(emoji_data.get('guildId') or data.get('guildId')))
+        if guild is None or not emoji_data.get('id'):
+            return
+        before = guild.emojis
+        emoji = self.store_emoji(guild, emoji_data)
+        if any(e.id == emoji.id for e in before):
+            guild.emojis = tuple(emoji if e.id == emoji.id else e for e in before)
+        else:
+            guild.emojis = before + (emoji,)
         self.dispatch('guild_emojis_update', guild, before, guild.emojis)
 
     def parse_guild_emoji_delete(self, data: Dict[str, Any]) -> None:
@@ -1192,6 +1303,23 @@ class ConnectionState:
         guild.stickers = tuple(s for s in before if s.id != sticker.id) + (sticker,)
         self.dispatch('guild_stickers_update', guild, before, guild.stickers)
 
+    def parse_guild_sticker_update(self, data: Dict[str, Any]) -> None:
+        # A renamed sticker: the row's current state, in GUILD_STICKER_CREATE's payload.
+        sticker_data = data.get('sticker') or {}
+        guild = self._get_guild(utils._snowflake(sticker_data.get('guildId') or data.get('guildId')))
+        if guild is None or not sticker_data.get('id'):
+            return
+        payload = dict(sticker_data)
+        payload.setdefault('guildId', str(guild.id))
+        before = guild.stickers
+        sticker = GuildSticker(state=self, data=payload)
+        self._stickers[sticker.id] = sticker
+        if any(s.id == sticker.id for s in before):
+            guild.stickers = tuple(sticker if s.id == sticker.id else s for s in before)
+        else:
+            guild.stickers = before + (sticker,)
+        self.dispatch('guild_stickers_update', guild, before, guild.stickers)
+
     def parse_guild_sticker_delete(self, data: Dict[str, Any]) -> None:
         guild = self._get_guild(utils._snowflake(data.get('guildId')))
         sticker_id = utils._snowflake((data.get('stickerDelete') or {}).get('stickerId'))
@@ -1201,6 +1329,100 @@ class ConnectionState:
         guild.stickers = tuple(s for s in before if s.id != sticker_id)
         self._stickers.pop(sticker_id, None)
         self.dispatch('guild_stickers_update', guild, before, guild.stickers)
+
+    def parse_guild_ban_add(self, data: Dict[str, Any]) -> None:
+        # GUILD_BAN_ADD may come before or after GUILD_MEMBER_REMOVE; it only reports the ban.
+        payload = data.get('guildBan') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        user_data = payload.get('user')
+        if guild is None or not isinstance(user_data, dict) or not user_data.get('id'):
+            return
+        user = self.store_user(user_data)
+        member = guild.get_member(user.id) or user
+        self.dispatch('member_ban', guild, member)
+
+    def parse_guild_ban_remove(self, data: Dict[str, Any]) -> None:
+        payload = data.get('guildBan') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        user_data = payload.get('user')
+        if guild is None or not isinstance(user_data, dict) or not user_data.get('id'):
+            return
+        self.dispatch('member_unban', guild, self.store_user(user_data))
+
+    def parse_invite_create(self, data: Dict[str, Any]) -> None:
+        payload = data.get('invite') or {}
+        if not payload.get('code'):
+            return
+        # The gateway counts max_age in seconds as ``maxAge`` (REST: ``maxAgeSec``); a 0 is left out.
+        invite_data = {
+            'code': payload['code'],
+            'guildId': payload.get('guildId') or data.get('guildId'),
+            'channelId': payload.get('channelId') or data.get('channelId') or None,
+            'inviter': payload.get('inviter'),
+            'maxUses': utils._int(payload.get('maxUses'), 0),
+            'uses': utils._int(payload.get('uses'), 0),
+            'maxAgeSec': utils._int(payload.get('maxAge'), 0),
+            'createdAt': payload.get('createdAt'),
+            'expiresAt': payload.get('expiresAt') or None,
+        }
+        self.dispatch('invite_create', Invite.from_incomplete(state=self, data=invite_data))
+
+    def parse_invite_delete(self, data: Dict[str, Any]) -> None:
+        payload = data.get('inviteDelete') or {}
+        if not payload.get('code'):
+            return
+        invite_data = {
+            'code': payload['code'],
+            'guildId': payload.get('guildId') or data.get('guildId'),
+            'channelId': payload.get('channelId') or data.get('channelId') or None,
+        }
+        self.dispatch('invite_delete', Invite.from_incomplete(state=self, data=invite_data))
+
+    def parse_guild_audit_log_entry_create(self, data: Dict[str, Any]) -> None:
+        payload = data.get('auditLogEntry') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        if guild is None or not payload.get('id'):
+            _log.debug('GUILD_AUDIT_LOG_ENTRY_CREATE referencing an unknown guild. Discarding.')
+            return
+        self.dispatch('audit_log_entry_create', AuditLogEntry(guild=guild, data=payload))
+
+    def parse_webhooks_update(self, data: Dict[str, Any]) -> None:
+        payload = data.get('webhooksUpdate') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        channel_id = utils._snowflake(payload.get('channelId') or data.get('channelId'))
+        channel = guild.get_channel(channel_id) if guild is not None and channel_id is not None else None
+        if channel is None:
+            _log.debug('WEBHOOKS_UPDATE referencing an unknown channel ID: %s. Discarding.', channel_id)
+            return
+        self.dispatch('webhooks_update', channel)
+
+    def _parse_automod_rule(self, data: Dict[str, Any], event: str) -> None:
+        payload = data.get('automodRule') or {}
+        guild = self._get_guild(utils._snowflake(payload.get('guildId') or data.get('guildId')))
+        if guild is None or not payload.get('id'):
+            _log.debug('An AutoMod rule event referencing an unknown guild. Discarding.')
+            return
+        self.dispatch(event, AutoModRule(data=payload, guild=guild, state=self))
+
+    def parse_auto_moderation_rule_create(self, data: Dict[str, Any]) -> None:
+        self._parse_automod_rule(data, 'automod_rule_create')
+
+    def parse_auto_moderation_rule_update(self, data: Dict[str, Any]) -> None:
+        self._parse_automod_rule(data, 'automod_rule_update')
+
+    def parse_auto_moderation_rule_delete(self, data: Dict[str, Any]) -> None:
+        self._parse_automod_rule(data, 'automod_rule_delete')
+
+    def parse_auto_moderation_action_execution(self, data: Dict[str, Any]) -> None:
+        payload = dict(data.get('automodAction') or {})
+        if not payload.get('guildId'):
+            payload['guildId'] = data.get('guildId')
+        if self._get_guild(utils._snowflake(payload.get('guildId'))) is None:
+            _log.debug('AUTO_MODERATION_ACTION_EXECUTION referencing an unknown guild. Discarding.')
+            return
+        if not payload.get('ruleId') or not payload.get('userId'):
+            return
+        self.dispatch('automod_action', AutoModAction(data=payload, state=self))
 
     def parse_voice_state_update(self, data: Dict[str, Any]) -> None:
         payload = data.get('voiceState') or {}
@@ -1286,6 +1508,63 @@ class ConnectionState:
     def parse_resumed(self, data: Dict[str, Any]) -> None:
         _log.debug('The gateway acknowledged a resume.')
 
+    def _sound_guild(self, data: Dict[str, Any], sound: Dict[str, Any]) -> Optional[Guild]:
+        return self._get_guild(utils._snowflake(sound.get('guildId') or data.get('guildId')))
+
+    def parse_guild_sound_create(self, data: Dict[str, Any]) -> None:
+        payload = data.get('sound') or {}
+        guild = self._sound_guild(data, payload)
+        if guild is None or not payload.get('id'):
+            _log.debug('GUILD_SOUND_CREATE referencing an unknown guild. Discarding.')
+            return
+        sound = SoundboardSound(guild=guild, state=self, data=payload)
+        guild._add_soundboard_sound(sound)
+        self.dispatch('soundboard_sound_create', sound)
+
+    def parse_guild_sound_update(self, data: Dict[str, Any]) -> None:
+        payload = data.get('sound') or {}
+        guild = self._sound_guild(data, payload)
+        sound_id = utils._snowflake(payload.get('id'))
+        if guild is None or sound_id is None:
+            _log.debug('GUILD_SOUND_UPDATE referencing an unknown guild. Discarding.')
+            return
+        sound = guild.get_soundboard_sound(sound_id)
+        if sound is None:
+            # Bisim does not send the sounds at connect, so one the library has not seen
+            # yet is reported with ``before`` the same as ``after``.
+            sound = SoundboardSound(guild=guild, state=self, data=payload)
+            guild._add_soundboard_sound(sound)
+            before = copy.copy(sound)
+        else:
+            before = copy.copy(sound)
+            sound._update(payload)
+        self.dispatch('soundboard_sound_update', before, sound)
+
+    def parse_guild_sound_delete(self, data: Dict[str, Any]) -> None:
+        sound_id = utils._snowflake((data.get('soundDelete') or {}).get('soundId'))
+        guild = self._get_guild(utils._snowflake(data.get('guildId')))
+        if guild is None or sound_id is None:
+            _log.debug('GUILD_SOUND_DELETE referencing an unknown guild. Discarding.')
+            return
+        sound = guild._remove_soundboard_sound(sound_id)
+        if sound is None:
+            # Not seen before: all that is known is its id.
+            sound = SoundboardSound(guild=guild, state=self, data={'id': str(sound_id), 'guildId': str(guild.id)})
+        self.dispatch('soundboard_sound_delete', sound)
+
+    def parse_soundboard_play(self, data: Dict[str, Any]) -> None:
+        # Someone pressed a sound in a voice channel: Discord's VOICE_CHANNEL_EFFECT_SEND.
+        from .channel import VoiceChannelEffect
+
+        payload = dict(data.get('soundboardPlay') or {})
+        guild = self._get_guild(utils._snowflake(data.get('guildId') or (payload.get('sound') or {}).get('guildId')))
+        channel_id = utils._snowflake(data.get('channelId'))
+        if guild is None or channel_id is None or guild.get_channel(channel_id) is None:
+            _log.debug('SOUNDBOARD_PLAY referencing an unknown guild or channel. Discarding.')
+            return
+        payload['channelId'] = str(channel_id)
+        self.dispatch('voice_channel_effect', VoiceChannelEffect(state=self, data=payload, guild=guild))
+
     def _ignore(self, data: Dict[str, Any]) -> None:
         return None
 
@@ -1294,9 +1573,5 @@ class ConnectionState:
     parse_relationship_update = _ignore
     parse_call_update = _ignore
     parse_voice_poke = _ignore
-    parse_soundboard_play = _ignore
     parse_user_layout_update = _ignore
-    parse_guild_sound_create = _ignore
-    parse_guild_sound_update = _ignore
-    parse_guild_sound_delete = _ignore
     parse_guild_patch = _ignore

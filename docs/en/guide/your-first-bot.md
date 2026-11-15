@@ -7,8 +7,9 @@ import os
 
 import bisim
 
-# Accepted for compatibility with discord.py; Bisim has no intents
 intents = bisim.Intents.default()
+# Privileged: switch Message Content on for the bot at bisim.gg/developers first
+intents.message_content = True
 client = bisim.Client(intents=intents)
 
 
@@ -41,8 +42,11 @@ Ctrl+C.
 
 ## What happened
 
-- `bisim.Client` is the connection to Bisim. It takes `intents` as discord.py does, but Bisim ignores them: a
-  bot receives every event its permissions let it see, including the text of every message.
+- `bisim.Client` is the connection to Bisim. `intents` says which events the bot wants, as on discord.py.
+  Reading the text of messages in servers takes the privileged `message_content` intent: switch it on at
+  [bisim.gg/developers](https://bisim.gg/developers) (your application, **Bot**, **Privileged Gateway
+  Intents**), or the bot fails to connect with `PrivilegedIntentsRequired`. The [events](topics/events.md#intents)
+  page explains every intent.
 - `@client.event` registers a coroutine as an event handler. The function's name says which event it handles,
   so it must be spelt exactly, as in `on_message`. The [events](topics/events.md) page lists the others.
 - `client.run()` is a blocking call. It sets up logging, logs in with the token, calls `setup_hook` and then
@@ -57,8 +61,8 @@ Bisim's gateway has no READY event carrying the bot's servers, so bisim.py build
 calls `on_ready`:
 
 1. It reads the bot's user and its list of servers over the REST API.
-2. For each server it loads the channels, roles, members, custom emoji, stickers and voice states, then
-   subscribes to the server's events. `on_guild_available` is dispatched for each one.
+2. For each server it loads the channels, roles, custom emoji, stickers and voice states, and the members
+   when the bot has the `members` intent, then subscribes to the server's events. `on_guild_available` is dispatched for each one.
 3. When every server is in, it dispatches `on_ready`. From then on `client.guilds`, `client.get_channel()`
    and the rest of the cache are filled in.
 

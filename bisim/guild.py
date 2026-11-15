@@ -40,7 +40,7 @@ from .enums import (
     VerificationLevel,
     try_enum,
 )
-from .errors import ClientException, HTTPException, InvalidData, NotFound, NotSupported
+from .errors import ClientException, InvalidData, NotFound, NotSupported
 from .file import File
 from .flags import SystemChannelFlags
 from .invite import Invite
@@ -56,6 +56,8 @@ from .voice_client import VoiceClient, VoiceProtocol
 
 if TYPE_CHECKING:
     from .abc import GuildChannel, Snowflake
+    from .automod import AutoModRule, AutoModRuleAction, AutoModTrigger
+    from .enums import AutoModRuleEventType
     from .state import ConnectionState
     from .webhook import Webhook
 
@@ -206,6 +208,7 @@ class Guild(Hashable):
         '_created_at',
         '_detail_loaded',
         '_subscribed',
+        '_soundboard_sounds',
         '__weakref__',
     )
 
@@ -223,6 +226,8 @@ class Guild(Hashable):
         self._my_role_ids: Set[int] = set()
         self._detail_loaded: bool = False
         self._subscribed: bool = False
+        # Sounds the library has seen: fetched, or announced since the bot connected.
+        self._soundboard_sounds: Dict[int, SoundboardSound] = {}
         self.id: int = int(data['id'])
         self._from_data(data)
 
@@ -668,8 +673,34 @@ class Guild(Hashable):
 
     @property
     def soundboard_sounds(self) -> List[SoundboardSound]:
-        """List[:class:`SoundboardSound`]: Not kept by the library; use :meth:`fetch_soundboard_sounds`."""
-        return []
+        """List[:class:`SoundboardSound`]: The guild's sounds the library has seen.
+
+        Bisim does not send a server's sounds when the bot connects: this holds
+        the sounds :meth:`fetch_soundboard_sounds` returned and those created or
+        changed since. Call :meth:`fetch_soundboard_sounds` once to load them all.
+        """
+        return list(self._soundboard_sounds.values())
+
+    def get_soundboard_sound(self, sound_id: int, /) -> Optional[SoundboardSound]:
+        """Returns a soundboard sound with the given ID, if the library has seen it.
+
+        Parameters
+        -----------
+        sound_id: :class:`int`
+            The ID to search for.
+
+        Returns
+        --------
+        Optional[:class:`SoundboardSound`]
+            The soundboard sound or ``None`` if not found.
+        """
+        return self._soundboard_sounds.get(sound_id)
+
+    def _add_soundboard_sound(self, sound: SoundboardSound, /) -> None:
+        self._soundboard_sounds[sound.id] = sound
+
+    def _remove_soundboard_sound(self, sound_id: int, /) -> Optional[SoundboardSound]:
+        return self._soundboard_sounds.pop(sound_id, None)
 
     @property
     def members(self) -> Sequence[Member]:
@@ -1261,6 +1292,8 @@ class Guild(Hashable):
 
         Raises
         ------
+        ClientException
+            The members intent is not enabled.
         HTTPException
             Getting the members failed.
 
@@ -1282,6 +1315,9 @@ class Guild(Hashable):
             members = [member async for member in guild.fetch_members(limit=150)]
             # members is now a list of Member...
         """
+        if not self._state._intents.members:
+            raise ClientException('Intents.members must be enabled to use this.')
+
         cursor: Optional[int]
         if after is utils.MISSING or after is None:
             cursor = None
@@ -1363,11 +1399,19 @@ class Guild(Hashable):
         cache: :class:`bool`
             Whether to cache the members as well.
 
+        Raises
+        -------
+        ClientException
+            The members intent is not enabled.
+
         Returns
         --------
         List[:class:`Member`]
             The list of members in the guild.
         """
+        if not self._state._intents.members:
+            raise ClientException('Intents.members must be enabled to use this.')
+
         members = [member async for member in self.fetch_members(limit=None)]
         if cache:
             for member in members:
@@ -1561,13 +1605,15 @@ class Guild(Hashable):
 
         Bans multiple users from the guild.
 
-        Bisim bans one user at a time, so this bans each user in turn and
-        reports who could not be banned.
+        The users must meet the :class:`abc.Snowflake` abc.
+
+        You must have :attr:`~Permissions.ban_members` and
+        :attr:`~Permissions.manage_guild` to do this.
 
         Parameters
         -----------
-        users: Sequence[:class:`abc.Snowflake`]
-            The users to ban from their guild.
+        users: Iterable[:class:`abc.Snowflake`]
+            The users to ban from their guild, up to 200.
         delete_message_seconds: :class:`int`
             The number of seconds worth of messages to delete from the user
             in the guild. The minimum is 0 and the maximum is 604800 (7 days).
@@ -1575,20 +1621,28 @@ class Guild(Hashable):
         reason: Optional[:class:`str`]
             The reason the users got banned.
 
+        Raises
+        -------
+        Forbidden
+            You do not have the proper permissions to ban.
+        HTTPException
+            Banning failed (none of the users could be banned).
+        ValueError
+            More than 200 users, or none, were given.
+
         Returns
         --------
         :class:`BulkBanResult`
             The result of the bulk ban operation.
         """
-        banned: List[Object] = []
-        failed: List[Object] = []
-        for user in users:
-            try:
-                await self._state.http.ban(user.id, self.id, delete_message_seconds, reason=reason)
-            except HTTPException:
-                failed.append(Object(id=user.id, type=User))
-            else:
-                banned.append(Object(id=user.id, type=User))
+        user_ids = [u.id for u in users]
+        if not user_ids:
+            raise ValueError('users must have at least one user.')
+        if len(user_ids) > 200:
+            raise ValueError('users has a maximum of 200 elements.')
+        data = await self._state.http.bulk_ban(self.id, user_ids, delete_message_seconds, reason=reason)
+        banned = [Object(id=int(u), type=User) for u in (data or {}).get('bannedUsers', [])]
+        failed = [Object(id=int(u), type=User) for u in (data or {}).get('failedUsers', [])]
         return BulkBanResult(banned=banned, failed=failed)
 
     async def fetch_ban(self, user: Snowflake) -> BanEntry:
@@ -2124,7 +2178,9 @@ class Guild(Hashable):
             The guild's sounds.
         """
         data = await self._state.http.get_soundboard_sounds(self.id)
-        return [SoundboardSound(guild=self, state=self._state, data=d) for d in data or []]
+        sounds = [SoundboardSound(guild=self, state=self._state, data=d) for d in data or []]
+        self._soundboard_sounds = {sound.id: sound for sound in sounds}
+        return sounds
 
     async def fetch_soundboard_sound(self, sound_id: int, /) -> SoundboardSound:
         """|coro|
@@ -2154,6 +2210,145 @@ class Guild(Hashable):
         from .http import _ResponseLike
 
         raise NotFound(_ResponseLike(404, 'Not Found'), 'Unknown sound')  # type: ignore
+
+    # ------------------------------------------------------------------
+    # AutoMod
+    # ------------------------------------------------------------------
+
+    async def fetch_automod_rule(self, rule_id: int, /) -> AutoModRule:
+        """|coro|
+
+        Fetches an active automod rule from the guild.
+
+        You must have :attr:`Permissions.manage_guild` to use this.
+
+        Parameters
+        -----------
+        rule_id: :class:`int`
+            The ID of the automod rule to fetch.
+
+        Raises
+        -------
+        Forbidden
+            You do not have permission to view the automod rule.
+
+        Returns
+        --------
+        :class:`AutoModRule`
+            The automod rule that was fetched.
+        """
+        from .automod import AutoModRule
+
+        data = await self._state.http.get_auto_moderation_rule(self.id, rule_id)
+        return AutoModRule(data=data, guild=self, state=self._state)
+
+    async def fetch_automod_rules(self) -> List[AutoModRule]:
+        """|coro|
+
+        Fetches all automod rules from the guild.
+
+        You must have :attr:`Permissions.manage_guild` to use this.
+
+        Raises
+        -------
+        Forbidden
+            You do not have permission to view the automod rule.
+        NotFound
+            There are no automod rules within this guild.
+
+        Returns
+        --------
+        List[:class:`AutoModRule`]
+            The automod rules that were fetched.
+        """
+        from .automod import AutoModRule
+
+        data = await self._state.http.get_auto_moderation_rules(self.id)
+        return [AutoModRule(data=d, guild=self, state=self._state) for d in data or []]
+
+    async def create_automod_rule(
+        self,
+        *,
+        name: str,
+        event_type: AutoModRuleEventType,
+        trigger: AutoModTrigger,
+        actions: List[AutoModRuleAction],
+        enabled: bool = False,
+        exempt_roles: Sequence[Snowflake] = utils.MISSING,
+        exempt_channels: Sequence[Snowflake] = utils.MISSING,
+        reason: str = utils.MISSING,
+    ) -> AutoModRule:
+        """|coro|
+
+        Create an automod rule.
+
+        You must have :attr:`Permissions.manage_guild` to do this.
+
+        Bisim's triggers are keyword, keyword preset, spam, mention spam and
+        member profile (a keyword rule on :attr:`AutoModRuleEventType.member_update`);
+        its actions are blocking the message, an alert in a channel and a
+        timeout, one of each at most.
+
+        Parameters
+        -----------
+        name: :class:`str`
+            The name of the automod rule.
+        event_type: :class:`AutoModRuleEventType`
+            The type of event that the automod rule will trigger on.
+        trigger: :class:`AutoModTrigger`
+            The trigger that will trigger the automod rule.
+        actions: List[:class:`AutoModRuleAction`]
+            The actions that will be taken when the automod rule is triggered.
+        enabled: :class:`bool`
+            Whether the automod rule is enabled.
+            Defaults to ``False``.
+        exempt_roles: Sequence[:class:`abc.Snowflake`]
+            A list of roles that will be exempt from the automod rule.
+        exempt_channels: Sequence[:class:`abc.Snowflake`]
+            A list of channels that will be exempt from the automod rule.
+        reason: :class:`str`
+            The reason for creating this automod rule. Shows up on the audit log.
+
+        Raises
+        -------
+        Forbidden
+            You do not have permissions to create an automod rule.
+        HTTPException
+            Creating the automod rule failed.
+        NotSupported
+            The trigger or an action is one Bisim does not have.
+
+        Returns
+        --------
+        :class:`AutoModRule`
+            The automod rule that was created.
+        """
+        from .automod import AutoModRule, _actions_to_bisim
+        from .enums import AutoModRuleActionType, AutoModRuleEventType, AutoModRuleTriggerType
+
+        if trigger.type is AutoModRuleTriggerType.harmful_link:
+            raise NotSupported('Harmful link AutoMod rules')
+        if any(a.type is AutoModRuleActionType.block_member_interactions for a in actions):
+            raise NotSupported('Blocking member interactions from AutoMod')
+        payload: Dict[str, Any] = {
+            'name': name,
+            'triggerType': trigger.type.to_bisim(),
+            'eventType': event_type.to_bisim(),
+            'enabled': enabled,
+        }
+        if trigger.type is AutoModRuleTriggerType.member_profile:
+            # Discord's member profile trigger is Bisim's keyword rule on member updates.
+            payload['eventType'] = AutoModRuleEventType.member_update.to_bisim()
+        payload.update(trigger._to_bisim())
+        payload.update(_actions_to_bisim(actions))
+        if exempt_roles is not utils.MISSING:
+            payload['exemptRoles'] = [str(x.id) for x in exempt_roles]
+        if exempt_channels is not utils.MISSING:
+            payload['exemptChannels'] = [str(x.id) for x in exempt_channels]
+        data = await self._state.http.create_auto_moderation_rule(
+            self.id, reason=reason if reason is not utils.MISSING else None, **payload
+        )
+        return AutoModRule(data=data, guild=self, state=self._state)
 
     # ------------------------------------------------------------------
     # Voice

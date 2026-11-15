@@ -732,18 +732,30 @@ class PartialMessage(Hashable):
             The new embeds to replace the original with. Must be a maximum of 10.
             To remove all embeds ``[]`` should be passed.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim: a message's files cannot be changed.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed. Only the bot's own messages can change their files.
+
+            .. note::
+
+                New files will always appear after current attachments.
         delete_after: Optional[:class:`float`]
             If provided, the number of seconds to wait in the background
             before deleting the message we just edited. If the deletion fails,
             then it is silently ignored.
         allowed_mentions: Optional[:class:`~bisim.AllowedMentions`]
-            Accepted for compatibility.
+            Controls the mentions being processed in this message. If this is
+            passed, then the object is merged with :attr:`~bisim.Client.allowed_mentions`.
+            The merging behaviour only overrides attributes that have been explicitly passed
+            to the object, otherwise it uses the attributes set in :attr:`~bisim.Client.allowed_mentions`.
+            If no object is passed at all then the defaults given by :attr:`~bisim.Client.allowed_mentions`
+            are used instead.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
         suppress: :class:`bool`
-            Whether to suppress embeds for the message.
+            Whether to suppress embeds for the message. This removes
+            all the embeds if set to ``True``. If set to ``False``
+            this brings the embeds back if they were suppressed.
 
         Raises
         -------
@@ -754,16 +766,37 @@ class PartialMessage(Hashable):
             edited a message's content or embed that isn't yours.
         TypeError
             You specified both ``embed`` and ``embeds``
-        NotSupported
-            Attachments were given.
 
         Returns
         --------
         :class:`Message`
             The newly edited message.
         """
-        if attachments is not utils.MISSING:
-            raise NotSupported("Changing a message's attachments")
+        return await self._edit_message(
+            content=content,
+            embed=embed,
+            embeds=embeds,
+            attachments=attachments,
+            delete_after=delete_after,
+            allowed_mentions=allowed_mentions,
+            view=view,
+            suppress=suppress,
+            known_files=None,
+        )
+
+    async def _edit_message(
+        self,
+        *,
+        content: Any,
+        embed: Any,
+        embeds: Any,
+        attachments: Any,
+        delete_after: Optional[float],
+        allowed_mentions: Any,
+        view: Any,
+        suppress: Any,
+        known_files: Optional[Sequence[Any]],
+    ) -> Message:
         if embed is not utils.MISSING and embeds is not utils.MISSING:
             raise TypeError('Cannot mix embed and embeds keyword arguments.')
 
@@ -775,9 +808,12 @@ class PartialMessage(Hashable):
             content=content,
             embed=embed,
             embeds=embeds,
+            attachments=attachments,
             view=view,
-            suppress_embeds=bool(suppress) if suppress is not utils.MISSING else False,
+            suppress_embeds=suppress,
+            allowed_mentions=allowed_mentions,
             editing=True,
+            known_files=known_files,
         )
         data = await self._state.http.edit_message(self.channel.id, self.id, payload)
         message = Message(state=self._state, channel=self.channel, data=data)
@@ -925,9 +961,6 @@ class PartialMessage(Hashable):
 
         You must have :attr:`~Permissions.manage_messages` to do this.
 
-        Bisim removes reactions one person at a time, so this removes each
-        person's reaction in turn.
-
         Parameters
         -----------
         emoji: Union[:class:`Emoji`, :class:`Reaction`, :class:`PartialEmoji`, :class:`str`]
@@ -945,21 +978,7 @@ class PartialMessage(Hashable):
             The emoji parameter is invalid.
         """
         emoji = convert_emoji_reaction(emoji)
-        http = self._state.http
-        after: Optional[str] = None
-        while True:
-            data = await http.get_reaction_users(self.channel.id, self.id, emoji, 100, after=after)
-            if not data:
-                return
-            for user in data:
-                user_id = int(user['id'])
-                if user_id == self._state.self_id:
-                    await http.remove_own_reaction(self.channel.id, self.id, emoji)
-                else:
-                    await http.remove_reaction(self.channel.id, self.id, emoji, user_id)
-            if len(data) < 100:
-                return
-            after = str(data[-1]['id'])
+        await self._state.http.clear_single_reaction(self.channel.id, self.id, emoji)
 
     async def clear_reactions(self) -> None:
         """|coro|
@@ -1105,7 +1124,10 @@ class Message(PartialMessage, Hashable):
     content: :class:`str`
         The actual contents of the message. Mentions are tokens inside it:
         ``<@id>``, ``<@&id>``, ``@everyone``, custom emoji ``<:name:id>`` and
-        stickers ``<sticker:id>``.
+        stickers ``<sticker:id>``. Without :attr:`Intents.message_content` it is
+        an empty string (and :attr:`embeds`, :attr:`attachments`,
+        :attr:`components` and :attr:`poll` are empty) unless the bot sent the
+        message, the message mentions the bot, or it is in a DM.
     nonce: Optional[Union[:class:`str`, :class:`int`]]
         The value used by Bisim clients to verify that the message is successfully sent.
     embeds: List[:class:`Embed`]
@@ -1119,8 +1141,11 @@ class Message(PartialMessage, Hashable):
         Specifies if the message mentions everyone.
     mentions: List[:class:`abc.User`]
         A list of :class:`Member` that were mentioned. If the message is in a private message
-        then the list will be of :class:`User` instead. Mentioned users the
-        library does not know are left out (their ids are in :attr:`raw_mentions`).
+        then the list will be of :class:`User` instead. A mentioned member who is not
+        cached is a :class:`User`. Bisim sends the mentions with every message
+        event, so this works without the message content intent; a message
+        read over REST lists only the users the library knows (every id is in
+        :attr:`raw_mentions`).
     role_mentions: List[:class:`Role`]
         A list of :class:`Role` that were mentioned. If the message is in a private message
         then the list is always empty.
@@ -1193,6 +1218,8 @@ class Message(PartialMessage, Hashable):
         '_created_at',
         'pinned_at',
         'ephemeral',
+        '_sent_mention_ids',
+        '_sent_role_mention_ids',
     )
 
     if TYPE_CHECKING:
@@ -1255,7 +1282,8 @@ class Message(PartialMessage, Hashable):
         # Author
         author = data.get('author') or {}
         author_id = utils._snowflake(author.get('id') or data.get('authorId'))
-        self.author = self._resolve_author(author, author_id)
+        member_data = data.get('member')
+        self.author = self._resolve_author(author, author_id, member_data if isinstance(member_data, dict) else None)
 
         # Interaction this message answers
         interaction = data.get('interaction')
@@ -1320,9 +1348,11 @@ class Message(PartialMessage, Hashable):
 
             self.poll = Poll._from_data(data=poll_data, message=self, state=state)
 
-        self._parse_mentions()
+        self._parse_mentions(data)
 
-    def _resolve_author(self, author: Dict[str, Any], author_id: Optional[int]) -> Union[User, Member]:
+    def _resolve_author(
+        self, author: Dict[str, Any], author_id: Optional[int], member_data: Optional[Dict[str, Any]] = None
+    ) -> Union[User, Member]:
         state = self._state
         if author_id is None:
             return state.create_user({'id': 0, 'username': 'Unknown'})
@@ -1335,6 +1365,13 @@ class Message(PartialMessage, Hashable):
                 if author:
                     member._user._patch(author)
                 return member
+            if member_data:
+                # The author's membership, as Bisim sends it with the message: a Member
+                # even when the members are not cached (no members intent).
+                from .member import Member
+
+                user_data = author if author.get('id') else {'id': str(author_id)}
+                return Member(data={**member_data, 'userId': str(author_id), 'user': user_data}, guild=self.guild, state=state)
         if author.get('id'):
             return state.store_user(author)
         user = state.get_user(author_id)
@@ -1342,21 +1379,41 @@ class Message(PartialMessage, Hashable):
             return user
         return state.create_user({'id': author_id, 'username': ''})
 
-    def _parse_mentions(self) -> None:
+    def _parse_mentions(self, data: Dict[str, Any]) -> None:
+        # Bisim sends the mentions beside the text (events: ``mentions`` as users,
+        # REST: ``mentionIds``), so they are known even when the text is not
+        # (a bot without the message content intent). The text adds the rest.
         content = self.content
-        self.mention_everyone: bool = bool(_EVERYONE_RE.search(content))
+        self.mention_everyone: bool = bool(data.get('mentionEveryone')) or bool(_EVERYONE_RE.search(content))
         guild = self.guild
         state = self._state
-        mentions: List[Union[User, Member]] = []
-        seen = set()
-        for raw in _USER_MENTION_RE.findall(content):
-            user_id = int(raw)
-            if user_id in seen:
+
+        sent_users: Dict[int, Dict[str, Any]] = {}
+        sent_ids: List[int] = []
+        for entry in data.get('mentions') or []:
+            raw_id = entry.get('id') if isinstance(entry, dict) else entry
+            user_id = utils._snowflake(raw_id)
+            if user_id is None:
                 continue
-            seen.add(user_id)
+            if isinstance(entry, dict) and entry.get('username'):
+                sent_users[user_id] = entry
+            sent_ids.append(user_id)
+        for raw_id in data.get('mentionIds') or []:
+            user_id = utils._snowflake(raw_id)
+            if user_id is not None:
+                sent_ids.append(user_id)
+        self._sent_mention_ids: List[int] = list(dict.fromkeys(sent_ids))
+        self._sent_role_mention_ids: List[int] = [
+            role_id for role_id in dict.fromkeys(utils._snowflake(r) for r in data.get('mentionRoleIds') or []) if role_id is not None
+        ]
+
+        mentions: List[Union[User, Member]] = []
+        for user_id in dict.fromkeys([int(raw) for raw in _USER_MENTION_RE.findall(content)] + self._sent_mention_ids):
             found: Optional[Union[User, Member]] = None
             if guild is not None:
                 found = guild.get_member(user_id)
+            if found is None and user_id in sent_users:
+                found = state.store_user(sent_users[user_id])
             if found is None:
                 found = state.get_user(user_id)
             if found is not None:
@@ -1364,8 +1421,8 @@ class Message(PartialMessage, Hashable):
         self.mentions: List[Union[User, Member]] = mentions
         self.role_mentions: List[Role] = []
         if guild is not None:
-            for raw in dict.fromkeys(_ROLE_MENTION_RE.findall(content)):
-                role = guild.get_role(int(raw))
+            for role_id in dict.fromkeys([int(raw) for raw in _ROLE_MENTION_RE.findall(content)] + self._sent_role_mention_ids):
+                role = guild.get_role(role_id)
                 if role is not None:
                     self.role_mentions.append(role)
         self.stickers: List[StickerItem] = [
@@ -1440,9 +1497,11 @@ class Message(PartialMessage, Hashable):
         the syntax of ``<@user_id>`` in the message content.
 
         This allows you to receive the user IDs of mentioned users
-        even in a private message context.
+        even in a private message context. The users Bisim lists as mentioned
+        are included too, so this works without the message content intent.
         """
-        return [int(x) for x in _USER_MENTION_RE.findall(self.content)]
+        found = [int(x) for x in _USER_MENTION_RE.findall(self.content)]
+        return found + [user_id for user_id in self._sent_mention_ids if user_id not in found]
 
     @property
     def raw_channel_mentions(self) -> List[int]:
@@ -1454,9 +1513,11 @@ class Message(PartialMessage, Hashable):
     @property
     def raw_role_mentions(self) -> List[int]:
         """List[:class:`int`]: A property that returns an array of role IDs matched with
-        the syntax of ``<@&role_id>`` in the message content.
+        the syntax of ``<@&role_id>`` in the message content, and the roles
+        Bisim lists as mentioned.
         """
-        return [int(x) for x in _ROLE_MENTION_RE.findall(self.content)]
+        found = [int(x) for x in _ROLE_MENTION_RE.findall(self.content)]
+        return found + [role_id for role_id in self._sent_role_mention_ids if role_id not in found]
 
     @property
     def channel_mentions(self) -> List[Any]:
@@ -1560,7 +1621,7 @@ class Message(PartialMessage, Hashable):
         embed: Optional[Embed] = utils.MISSING,
         embeds: Sequence[Embed] = utils.MISSING,
         attachments: Sequence[Union[Attachment, File]] = utils.MISSING,
-        suppress: bool = False,
+        suppress: bool = utils.MISSING,
         delete_after: Optional[float] = None,
         allowed_mentions: Optional[AllowedMentions] = utils.MISSING,
         view: Optional[View] = utils.MISSING,
@@ -1583,15 +1644,27 @@ class Message(PartialMessage, Hashable):
             The new embeds to replace the original with. Must be a maximum of 10.
             To remove all embeds ``[]`` should be passed.
         attachments: List[Union[:class:`Attachment`, :class:`File`]]
-            Not supported on Bisim.
+            A list of attachments to keep in the message as well as new files to upload. If ``[]`` is passed
+            then all attachments are removed. Only the bot's own messages can change their files.
+
+            .. note::
+
+                New files will always appear after current attachments.
         suppress: :class:`bool`
-            Whether to suppress embeds for the message.
+            Whether to suppress embeds for the message. This removes
+            all the embeds if set to ``True``. If set to ``False``
+            this brings the embeds back if they were suppressed.
         delete_after: Optional[:class:`float`]
             If provided, the number of seconds to wait in the background
             before deleting the message we just edited. If the deletion fails,
             then it is silently ignored.
         allowed_mentions: Optional[:class:`~bisim.AllowedMentions`]
-            Accepted for compatibility.
+            Controls the mentions being processed in this message. If this is
+            passed, then the object is merged with :attr:`~bisim.Client.allowed_mentions`.
+            The merging behaviour only overrides attributes that have been explicitly passed
+            to the object, otherwise it uses the attributes set in :attr:`~bisim.Client.allowed_mentions`.
+            If no object is passed at all then the defaults given by :attr:`~bisim.Client.allowed_mentions`
+            are used instead.
         view: Optional[:class:`~bisim.ui.View`]
             The updated view to update this message with. If ``None`` is passed then
             the view is removed.
@@ -1611,7 +1684,7 @@ class Message(PartialMessage, Hashable):
         :class:`Message`
             The newly edited message.
         """
-        message = await super().edit(
+        return await self._edit_message(
             content=content,
             embed=embed,
             embeds=embeds,
@@ -1619,20 +1692,58 @@ class Message(PartialMessage, Hashable):
             delete_after=delete_after,
             allowed_mentions=allowed_mentions,
             view=view,
-            suppress=suppress if suppress else utils.MISSING,
+            suppress=suppress,
+            known_files=self.attachments,
         )
-        return message
 
     async def add_files(self, *files: File) -> Message:
-        """|coro|
+        r"""|coro|
 
-        Not supported on Bisim: a message's files cannot be changed.
+        Adds new files to the end of the message attachments.
+
+        Only the bot's own messages can change their files.
+
+        Parameters
+        -----------
+        \*files: :class:`File`
+            New files to add to the message.
+
+        Raises
+        -------
+        HTTPException
+            Editing the message failed.
+        Forbidden
+            Tried to edit a message that isn't yours.
+
+        Returns
+        --------
+        :class:`Message`
+            The newly edited message.
         """
-        raise NotSupported("Changing a message's attachments")
+        return await self.edit(attachments=[*self.attachments, *files])
 
     async def remove_attachments(self, *attachments: Attachment) -> Message:
-        """|coro|
+        r"""|coro|
 
-        Not supported on Bisim: a message's files cannot be changed.
+        Removes attachments from the message.
+
+        Only the bot's own messages can change their files.
+
+        Parameters
+        -----------
+        \*attachments: :class:`Attachment`
+            Attachments to remove from the message.
+
+        Raises
+        -------
+        HTTPException
+            Editing the message failed.
+        Forbidden
+            Tried to edit a message that isn't yours.
+
+        Returns
+        --------
+        :class:`Message`
+            The newly edited message.
         """
-        raise NotSupported("Changing a message's attachments")
+        return await self.edit(attachments=[a for a in self.attachments if a not in attachments])

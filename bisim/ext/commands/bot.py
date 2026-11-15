@@ -165,7 +165,7 @@ class BotBase(GroupMixin[None]):
                 or (isinstance(prefix, collections.abc.Iterable) and len(list(prefix)) >= 1)
             )
             if trigger_warning:
-                _log.debug('Bisim always sends message content; the message_content intent changes nothing.')
+                _log.warning('Privileged message content intent is missing, commands may not work as expected.')
 
     def dispatch(self, event_name: str, /, *args: Any, **kwargs: Any) -> None:
         super().dispatch(event_name, *args, **kwargs)  # type: ignore

@@ -67,11 +67,11 @@ Bisim's storage first and then sends the message that refers to them, all inside
 Files a person sent are in `message.attachments`. `await attachment.save('copy.png')` writes one to disk, and
 `await attachment.to_file()` turns it into a `File` you can send again.
 
-!!! note "What Bisim does not support with files"
-
-    A message's files cannot be changed after it is sent, so `message.edit(attachments=...)`,
-    `add_files()` and `remove_attachments()` raise `bisim.NotSupported`. Interaction responses and webhooks
-    do not take files yet either.
+The bot can change the files of its own messages, as in discord.py: `message.edit(attachments=[...])` takes
+the whole list after the edit (an `Attachment` of the message is kept, a `File` is uploaded and added, a file
+left out is removed), and `add_files()` and `remove_attachments()` do the same in one step. Interaction answers
+and webhooks take files too. An embed shows one of the message's files with `attachment://name`: see
+[Embeds](embeds.md).
 
 ## Reading messages
 
@@ -125,8 +125,26 @@ Pinning needs the Pin Messages permission.
 
 ## Not on Bisim
 
+## Mentions and flags
+
+`allowed_mentions` works as on Discord, per message or for the whole client with
+`Client(allowed_mentions=...)`: without it every mention in the text may ping; with it only what it allows does,
+and Bisim writes the rest into the message as plain words (the person's or the role's name), so it pings nobody.
+
+```python
+await channel.send('Server restart in 5 minutes, @everyone', allowed_mentions=bisim.AllowedMentions(everyone=False))
+await channel.send(f'Thanks {member.mention}', silent=True)  # no notification
+await channel.send('https://example.com', suppress_embeds=True)  # no link card
+await message.edit(suppress=True)  # hide a message's embeds; suppress=False brings them back
+```
+
+`message.flags.suppress_embeds` and `message.flags.silent` tell what a message was sent with; a message with
+its embeds suppressed has `message.embeds` empty.
+
+## Not on Bisim
+
 These raise `bisim.NotSupported`: threads (`message.create_thread()`), forwarding (`message.forward()`) and
-publishing to announcement channels (`message.publish()`). Text to speech (`tts=True`) and `allowed_mentions`
-are accepted and ignored.
+publishing to announcement channels (`message.publish()`). Text to speech (`tts=True`) is accepted and
+ignored.
 
 The full list of message methods is in the [API reference](../../reference/messages.md).

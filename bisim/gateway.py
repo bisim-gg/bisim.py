@@ -200,7 +200,7 @@ class BisimWebSocket:
 
             raise ClientException('The client must log in before connecting.')
 
-        data = await client.http.get_bot_gateway(application_id)
+        data = await client.http.get_bot_gateway(application_id, state._intents.value)
         token = data['token']
         base = gateway or client.gateway_url
         joiner = '&' if '?' in base else '?'
@@ -317,9 +317,11 @@ class BisimWebSocket:
         _log.debug('Unknown gateway op %s.', op)
 
     def _can_handle_close(self) -> bool:
-        # Bisim's gateway has no close codes that mean "give up": a bad pass is
-        # refused before the upgrade, so every close is worth a reconnect.
-        return True
+        # A bad pass is refused before the upgrade. After it, only the intents
+        # close for good: 4013 (a bit Discord does not define) and 4014 (a
+        # privileged intent the application has not switched on), both before HELLO.
+        code = self._close_code or self.socket.close_code
+        return code not in (4013, 4014)
 
     async def poll_event(self) -> None:
         """Polls for a DISPATCH event and handles the general gateway loop.
@@ -354,6 +356,7 @@ class BisimWebSocket:
             if self._can_handle_close():
                 _log.debug('Websocket closed with %s, attempting a reconnect.', code)
                 raise ReconnectWebSocket() from None
+            _log.debug('Websocket closed with %s, cannot reconnect.', code)
             raise ConnectionClosed(self.socket, code=code) from None
 
     async def send(self, data: str, /) -> None:

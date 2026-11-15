@@ -29,6 +29,7 @@ __all__ = (
     'RoleFlags',
     'AttachmentFlags',
     'EmbedFlags',
+    'AutoModPresets',
 )
 
 F = TypeVar('F', bound='BaseFlags')
@@ -437,11 +438,25 @@ class PublicUserFlags(BaseFlags):
 
 @fill_with_flags()
 class Intents(BaseFlags):
-    r"""Wraps up a gateway intent flag value.
+    r"""Wraps up a Bisim gateway intent flag.
 
-    Bisim has no intents: a bot receives what its permissions in each server
-    let it see. This class is accepted wherever discord.py takes one so that
-    existing bots run unchanged, and it changes nothing.
+    Similar to :class:`Permissions`\, the properties provided are two way.
+    You can set and retrieve individual bits using the properties as if they
+    were regular bools.
+
+    To construct an object you can pass keyword arguments denoting the flags
+    to enable or disable.
+
+    This is used to disable certain gateway features that are unnecessary to
+    run your bot. To make use of this, it is passed to the ``intents`` keyword
+    argument of :class:`Client`. The bits are Discord's, number for number.
+
+    Three intents are privileged: :attr:`members`, :attr:`presences` and
+    :attr:`message_content`. Each must also be switched on for the application
+    at https://bisim.gg/developers (your application, **Bot**, **Privileged
+    Gateway Intents**), and from 100 servers on Bisim must approve it. Asking
+    for one that is not switched on closes the connection with code 4014 and
+    raises :exc:`PrivilegedIntentsRequired`.
 
     .. container:: operations
 
@@ -511,17 +526,63 @@ class Intents(BaseFlags):
 
     @flag_value
     def guilds(self) -> int:
-        """:class:`bool`: Whether guild related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_guild_update`
+        - :func:`on_guild_role_create`
+        - :func:`on_guild_role_update`
+        - :func:`on_guild_role_delete`
+        - :func:`on_guild_channel_create`
+        - :func:`on_guild_channel_update`
+        - :func:`on_guild_channel_delete`
+        - :func:`on_guild_channel_pins_update`
+        - :func:`on_voice_channel_status_update`
+
+        It is highly advisable to leave this intent enabled for your bot to function.
+        """
         return 1 << 0
 
     @flag_value
     def members(self) -> int:
-        """:class:`bool`: Whether guild member related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild member related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_member_join`
+        - :func:`on_member_remove`
+        - :func:`on_raw_member_remove`
+        - :func:`on_member_update`
+        - :func:`on_user_update` (about someone else, :attr:`presences` lets it through too)
+
+        This also corresponds to the following attributes and classes in terms of cache:
+
+        - :meth:`Guild.chunk`
+        - :meth:`Guild.fetch_members`
+        - :attr:`Guild.members`
+
+        Without it, Bisim refuses the full member list, so the library does
+        not load the members at startup; :meth:`Guild.fetch_member` and
+        :meth:`Guild.query_members` still work.
+
+        .. note::
+
+            This is a privileged intent: switch it on at https://bisim.gg/developers.
+            Bots in 100 servers or more need Bisim's approval as well.
+        """
         return 1 << 1
 
     @flag_value
     def moderation(self) -> int:
-        """:class:`bool`: Whether guild moderation related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild moderation related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_member_ban`
+        - :func:`on_member_unban`
+        - :func:`on_audit_log_entry_create`
+        """
         return 1 << 2
 
     @alias_flag_value
@@ -531,7 +592,13 @@ class Intents(BaseFlags):
 
     @flag_value
     def expressions(self) -> int:
-        """:class:`bool`: Whether guild emoji, sticker, and soundboard sound related events are enabled."""
+        """:class:`bool`: Whether guild emoji, sticker, and soundboard sound related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_guild_emojis_update`
+        - :func:`on_guild_stickers_update`
+        """
         return 1 << 3
 
     @alias_flag_value
@@ -546,112 +613,241 @@ class Intents(BaseFlags):
 
     @flag_value
     def integrations(self) -> int:
-        """:class:`bool`: Whether guild integration related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild integration related events are enabled.
+
+        Bisim sends no integration events, so this changes nothing.
+        """
         return 1 << 4
 
     @flag_value
     def webhooks(self) -> int:
-        """:class:`bool`: Whether guild webhook related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild webhook related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_webhooks_update`
+        """
         return 1 << 5
 
     @flag_value
     def invites(self) -> int:
-        """:class:`bool`: Whether guild invite related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild invite related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_invite_create`
+        - :func:`on_invite_delete`
+        """
         return 1 << 6
 
     @flag_value
     def voice_states(self) -> int:
-        """:class:`bool`: Whether guild voice state related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild voice state related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_voice_state_update`
+
+        The bot's own voice state always arrives, so a voice client works without it.
+        """
         return 1 << 7
 
     @flag_value
     def presences(self) -> int:
-        """:class:`bool`: Whether guild presence related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild presence related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_presence_update`
+        - :func:`on_raw_presence_update`
+
+        This also corresponds to the following attributes and classes in terms of cache:
+
+        - :attr:`Member.activities`
+        - :attr:`Member.status`
+        - :attr:`Member.raw_status`
+
+        Without it, Bisim sends no presence at all, so every member reads as offline.
+
+        .. note::
+
+            This is a privileged intent: switch it on at https://bisim.gg/developers.
+            Bots in 100 servers or more need Bisim's approval as well.
+        """
         return 1 << 8
 
     @alias_flag_value
     def messages(self) -> int:
-        """:class:`bool`: Whether guild and direct message related events are enabled."""
+        """:class:`bool`: Whether guild and direct message related events are enabled.
+
+        This is a shortcut to set or get both :attr:`guild_messages` and :attr:`dm_messages`.
+        """
         return (1 << 9) | (1 << 12)
 
     @flag_value
     def guild_messages(self) -> int:
-        """:class:`bool`: Whether guild message related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild message related events are enabled.
+
+        This corresponds to the following events in servers:
+
+        - :func:`on_message`
+        - :func:`on_message_edit`
+        - :func:`on_message_delete`
+        - :func:`on_bulk_message_delete`
+        - :func:`on_raw_message_edit`
+        - :func:`on_raw_message_delete`
+        - :func:`on_raw_bulk_message_delete`
+        """
         return 1 << 9
 
     @flag_value
     def dm_messages(self) -> int:
-        """:class:`bool`: Whether direct message related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether direct message related events are enabled.
+
+        This corresponds to the same events as :attr:`guild_messages`, in DMs,
+        and to :func:`on_private_channel_pins_update`.
+        """
         return 1 << 12
 
     @alias_flag_value
     def reactions(self) -> int:
-        """:class:`bool`: Whether guild and direct message reaction related events are enabled."""
+        """:class:`bool`: Whether guild and direct message reaction related events are enabled.
+
+        This is a shortcut to set or get both :attr:`guild_reactions` and :attr:`dm_reactions`.
+        """
         return (1 << 10) | (1 << 13)
 
     @flag_value
     def guild_reactions(self) -> int:
-        """:class:`bool`: Whether guild message reaction related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild message reaction related events are enabled.
+
+        This corresponds to the following events in servers:
+
+        - :func:`on_reaction_add`
+        - :func:`on_reaction_remove`
+        - :func:`on_reaction_clear`
+        - :func:`on_raw_reaction_add`
+        - :func:`on_raw_reaction_remove`
+        - :func:`on_raw_reaction_clear`
+        """
         return 1 << 10
 
     @flag_value
     def dm_reactions(self) -> int:
-        """:class:`bool`: Whether direct message reaction related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether direct message reaction related events are enabled.
+
+        This corresponds to the same events as :attr:`guild_reactions`, in DMs.
+        """
         return 1 << 13
 
     @alias_flag_value
     def typing(self) -> int:
-        """:class:`bool`: Whether guild and direct message typing related events are enabled."""
+        """:class:`bool`: Whether guild and direct message typing related events are enabled.
+
+        This is a shortcut to set or get both :attr:`guild_typing` and :attr:`dm_typing`.
+        """
         return (1 << 11) | (1 << 14)
 
     @flag_value
     def guild_typing(self) -> int:
-        """:class:`bool`: Whether guild and direct message typing related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether guild typing related events are enabled.
+
+        This corresponds to :func:`on_typing` and :func:`on_raw_typing` in servers.
+        """
         return 1 << 11
 
     @flag_value
     def dm_typing(self) -> int:
-        """:class:`bool`: Whether direct message typing related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether direct message typing related events are enabled.
+
+        This corresponds to :func:`on_typing` and :func:`on_raw_typing` in DMs.
+        """
         return 1 << 14
 
     @flag_value
     def message_content(self) -> int:
-        """:class:`bool`: Whether message content is sent. Bisim always sends it (no effect on Bisim)."""
+        """:class:`bool`: Whether message content, attachments, embeds, components and polls will be available
+        in messages which do not meet the following criteria:
+
+        - The message was sent by the client
+        - The message was sent in direct messages
+        - The message mentions the client
+
+        This applies to the message events and to messages read over REST
+        (:meth:`abc.Messageable.history`, :meth:`abc.Messageable.fetch_message`,
+        :meth:`abc.Messageable.pins`), and to :attr:`AutoModAction.content`.
+        Without it such a message has an empty :attr:`Message.content` and no
+        embeds, attachments, components or poll.
+
+        .. note::
+
+            This is a privileged intent: switch it on at https://bisim.gg/developers.
+            Bots in 100 servers or more need Bisim's approval as well.
+        """
         return 1 << 15
 
     @flag_value
     def guild_scheduled_events(self) -> int:
-        """:class:`bool`: Not on Bisim."""
+        """:class:`bool`: Whether guild scheduled event related events are enabled.
+
+        Bisim has no scheduled events, so this changes nothing.
+        """
         return 1 << 16
 
     @alias_flag_value
     def auto_moderation(self) -> int:
-        """:class:`bool`: Whether auto moderation related events are enabled (no effect on Bisim)."""
+        """:class:`bool`: Whether auto moderation related events are enabled.
+
+        This is a shortcut to set or get both :attr:`auto_moderation_configuration`
+        and :attr:`auto_moderation_execution`.
+        """
         return (1 << 20) | (1 << 21)
 
     @flag_value
     def auto_moderation_configuration(self) -> int:
-        """:class:`bool`: No effect on Bisim."""
+        """:class:`bool`: Whether auto moderation configuration related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_automod_rule_create`
+        - :func:`on_automod_rule_update`
+        - :func:`on_automod_rule_delete`
+        """
         return 1 << 20
 
     @flag_value
     def auto_moderation_execution(self) -> int:
-        """:class:`bool`: No effect on Bisim."""
+        """:class:`bool`: Whether auto moderation execution related events are enabled.
+
+        This corresponds to the following events:
+
+        - :func:`on_automod_action`
+        """
         return 1 << 21
 
     @alias_flag_value
     def polls(self) -> int:
-        """:class:`bool`: Whether guild and direct message poll related events are enabled."""
+        """:class:`bool`: Whether guild and direct message poll related events are enabled.
+
+        This is a shortcut to set or get both :attr:`guild_polls` and :attr:`dm_polls`.
+        """
         return (1 << 24) | (1 << 25)
 
     @flag_value
     def guild_polls(self) -> int:
-        """:class:`bool`: No effect on Bisim."""
+        """:class:`bool`: Whether guild poll related events are enabled.
+
+        This corresponds to :func:`on_poll_vote_add`, :func:`on_poll_vote_remove`
+        and their raw versions in servers.
+        """
         return 1 << 24
 
     @flag_value
     def dm_polls(self) -> int:
-        """:class:`bool`: No effect on Bisim."""
+        """:class:`bool`: Whether direct message poll related events are enabled.
+
+        This corresponds to the same events as :attr:`guild_polls`, in DMs.
+        """
         return 1 << 25
 
 
@@ -954,3 +1150,86 @@ class AppInstallationType(ArrayFlags):
     def user(self) -> int:
         """:class:`bool`: Not on Bisim."""
         return 1 << 1
+
+
+_AUTOMOD_PRESET_NAMES = ('PROFANITY', 'SEXUAL', 'SLURS')
+
+
+@fill_with_flags()
+class AutoModPresets(ArrayFlags):
+    r"""Wraps up the :class:`AutoModRule` presets.
+
+    Bisim's presets map to Discord's: ``PROFANITY`` is :attr:`profanity`,
+    ``SEXUAL`` is :attr:`sexual_content` and ``SLURS`` is :attr:`slurs`.
+
+    .. container:: operations
+
+        .. describe:: x == y
+
+            Checks if two AutoMod preset flags are equal.
+        .. describe:: x != y
+
+            Checks if two AutoMod preset flags are not equal.
+        .. describe:: x | y, x |= y
+
+            Returns an AutoModPresets instance with all enabled flags from
+            both x and y.
+        .. describe:: x & y, x &= y
+
+            Returns an AutoModPresets instance with only flags enabled on
+            both x and y.
+        .. describe:: hash(x)
+
+            Return the flag's hash.
+        .. describe:: iter(x)
+
+            Returns an iterator of ``(name, value)`` pairs.
+
+    Attributes
+    -----------
+    value: :class:`int`
+        The raw value. You should query flags via the properties
+        rather than using this raw value.
+    """
+
+    __slots__ = ()
+
+    def __init__(self, value: int = 0, **kwargs: bool):
+        super().__init__(**kwargs)
+        if value:
+            self.value = value
+
+    @classmethod
+    def _from_bisim(cls, names: Any) -> Self:
+        value = 0
+        for name in names or ():
+            if isinstance(name, int):
+                value |= 1 << (name - 1)
+                continue
+            try:
+                value |= 1 << _AUTOMOD_PRESET_NAMES.index(str(name).upper())
+            except ValueError:
+                pass
+        return cls._from_value(value)
+
+    def _to_bisim(self) -> List[str]:
+        return [name for index, name in enumerate(_AUTOMOD_PRESET_NAMES) if self.value & (1 << index)]
+
+    def to_array(self) -> List[int]:
+        """List[:class:`int`]: Discord's numbers of the presets that are on (1, 2 and 3)."""
+        return [index + 1 for index in range(len(_AUTOMOD_PRESET_NAMES)) if self.value & (1 << index)]
+
+    @flag_value
+    def profanity(self) -> int:
+        """:class:`bool`: Whether to use the preset profanity filter."""
+        return 1 << 0
+
+    @flag_value
+    def sexual_content(self) -> int:
+        """:class:`bool`: Whether to use the preset sexual content filter."""
+        return 1 << 1
+
+    @flag_value
+    def slurs(self) -> int:
+        """:class:`bool`: Whether to use the preset slurs filter."""
+        return 1 << 2

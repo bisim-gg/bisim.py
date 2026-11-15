@@ -16,9 +16,9 @@ async def hello(interaction: bisim.Interaction) -> None:
     await interaction.response.send_message('Hi there', embed=embed)
 ```
 
-`send_message()` takes `content`, `embed` or `embeds` (up to 10), `view` for
-[buttons and select menus](../components/buttons.md), `ephemeral` and `delete_after` (seconds after which
-the answer is deleted).
+`send_message()` takes `content`, `embed` or `embeds` (up to 10), `file` or `files` (up to 10), `view` for
+[buttons and select menus](../components/buttons.md), `poll`, `ephemeral`, `silent` (no notification),
+`suppress_embeds`, `allowed_mentions` and `delete_after` (seconds after which the answer is deleted).
 
 ## Ephemeral answers
 
@@ -53,8 +53,9 @@ the thinking message; `thinking=` matters for [buttons and select menus](../comp
 !!! note
     As on Discord, the first followup after a deferral takes the place of the thinking message and keeps the
     deferral's visibility, so `interaction.followup.send()` finishes the answer as well as
-    `edit_original_response()` does. A thinking message that is never filled shows "The application did not
-    respond" once the 15 minutes are over.
+    `edit_original_response()` does (Bisim does this since 2026-11-14). Later followups are new messages. A
+    poll cannot fill the thinking message: fill it first, then send the poll as a followup. A thinking message
+    that is never filled shows "The application did not respond" once the 15 minutes are over.
 
 ## Followups
 
@@ -81,8 +82,10 @@ message = await interaction.original_response()   # an InteractionMessage
 await interaction.delete_original_response()
 ```
 
-`edit_original_response()` takes `content`, `embed` or `embeds` and `view` (`None` removes the view). It is
-also the only way to edit an ephemeral answer.
+`edit_original_response()` takes `content`, `embed` or `embeds`, `attachments`, `view` (`None` removes the
+view) and `allowed_mentions`. It is also the only way to edit an ephemeral answer. `attachments` is the whole
+list after the edit, as in discord.py: an `Attachment` of the message is kept, a `File` is uploaded and added,
+and a file left out is removed; leave `attachments` out to keep every file.
 
 ## Answering once
 
@@ -97,16 +100,44 @@ async def tell(interaction: bisim.Interaction, text: str) -> None:
         await interaction.response.send_message(text, ephemeral=True)
 ```
 
-## What an answer cannot carry
+## Files, pictures and polls
 
-Bisim does not take files, attachments or polls in interaction answers. `file=` and `files=` in
-`send_message()` and `followup.send()`, `attachments=` in `edit_original_response()` and `poll=` in any of
-them raise `bisim.NotSupported` instead of being dropped. To share a file, answer first and then post it as an
-ordinary message in the channel:
+An answer carries files as any message does. The library uploads each file with the interaction's token
+first, then sends the answer that names it, so a bot answering on an
+[Interactions URL](../topics/interactions-url.md) can send files too. An embed shows one of them with
+`attachment://name`:
 
 ```python
-await interaction.response.send_message('Here is the report.')
-await interaction.channel.send(file=bisim.File('report.txt'))  # type: ignore[union-attr]
+file = bisim.File('chart.png')
+embed = bisim.Embed(title='This week').set_image(url='attachment://chart.png')
+await interaction.response.send_message(file=file, embed=embed)
+
+# After a deferral, the file fills the thinking message.
+await interaction.response.defer(thinking=True)
+await interaction.edit_original_response(content='Done.', attachments=[bisim.File('report.txt')])
+```
+
+A poll is sent on its own (no text, embeds, files or view with it) and never in an ephemeral answer:
+
+```python
+poll = bisim.Poll('Lunch?', duration=datetime.timedelta(hours=2))
+poll.add_answer(text='Rice').add_answer(text='Bread')
+await interaction.response.send_message(poll=poll)
+```
+
+A poll cannot be added in an edit: `edit_original_response(poll=...)` raises `bisim.NotSupported`.
+
+## Mentions
+
+`allowed_mentions` works as on Discord: without it every mention in the text may ping; with it only what it
+allows does, and the rest is written as plain words. `Client(allowed_mentions=...)` sets the default for every
+message, interaction answers included.
+
+```python
+await interaction.response.send_message(
+    f'{interaction.user.mention} started a vote, @everyone',
+    allowed_mentions=bisim.AllowedMentions(everyone=False),
+)
 ```
 
 Embeds work, with the limits described in [Embeds](../topics/embeds.md). The methods are listed under
