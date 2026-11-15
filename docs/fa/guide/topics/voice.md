@@ -62,9 +62,11 @@ async def join(interaction: bisim.Interaction) -> None:
 همان سرور خطای `bisim.ClientException` می‌دهد و `guild.voice_client` همان اتصالی است که ربات دارد (و اگر
 نداشته باشد `None`). `client.voice_clients` همهٔ آن‌ها را فهرست می‌کند.
 
-`connect()` آرگومان‌های discord.py را می‌گیرد: `timeout` (به ثانیه، پیش‌فرض ۶۰)، `reconnect` (اگر اتصال قطع
+`connect()` آرگومان‌های discord.py را می‌گیرد: `timeout` (به ثانیه، پیش‌فرض ۳۰)، `reconnect` (اگر اتصال قطع
 شد دوباره بپیوندد، پیش‌فرض روشن)، `self_mute`، `self_deaf` و `cls` (یک `VoiceProtocol` دیگر، مثل
-`voice_recv.VoiceRecvClient`).
+`voice_recv.VoiceRecvClient`). یک پیش‌فرض فرق دارد: ربات ناشنوا وارد می‌شود مگر `self_deaf=False` بدهید
+(پیش‌فرض discord.py `False` است)، چون بی‌سیم نمی‌گذارد رباتی صدای افراد را بشنود مگر خودش بخواهد.
+`VoiceRecvClient` ناشنوا وارد نمی‌شود.
 
 ## پخش فایل یا نشانی اینترنتی
 
@@ -138,7 +140,8 @@ await vc.disconnect()
 
 `await guild.change_voice_state(channel=vc.channel, self_mute=True, self_deaf=True)` بی‌صدا و ناشنوا بودن خود
 ربات را تغییر می‌دهد که همه کنار نامش می‌بینند. صدای رباتی که خودش را بی‌صدا کرده شنیده نمی‌شود و رباتی که خودش
-را ناشنوا کرده چیزی دریافت نمی‌کند.
+را ناشنوا کرده چیزی دریافت نمی‌کند، و بی‌سیم این را روی سرور صدا اجرا می‌کند، هر چه کد بخواهد. اگر `self_mute` یا
+`self_deaf` را به `change_voice_state` ندهید، همان که هست می‌ماند.
 
 اتصال از آنچه روی سرور رخ می‌دهد پیروی می‌کند:
 
@@ -168,6 +171,9 @@ def callback(user, data: voice_recv.VoiceData) -> None:
 vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
 vc.listen(voice_recv.BasicSink(callback))
 ```
+
+`VoiceRecvClient` ناشنوا وارد نمی‌شود و `listen()` روی رباتی که ناشنواست اول ناشنوایی را برمی‌دارد: صدا از وقتی
+می‌رسد که بی‌سیم تغییر را گرفته باشد.
 
 صدای هر کس جداگانه می‌رسد، در هر فراخوانی ۲۰ میلی‌ثانیه PCM استریوی ۱۶ بیتی ۴۸ کیلوهرتز (`data.pcm`، ۳٬۸۴۰
 بایت)؛ `data.opus` برابر `None` است، چون Opus در کار نیست. این تابع هم مثل `after` روی رشتهٔ اجرای دریافت اجرا

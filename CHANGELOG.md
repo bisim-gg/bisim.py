@@ -4,6 +4,16 @@ All notable changes to bisim.py are listed here.
 
 ## Unreleased
 
+- A bot joins voice deafened unless it asks to hear: `connect()` left without
+  `self_deaf` joins deafened, as Bisim enforces a bot's deafen on its media
+  server (a deafened bot receives no audio and everyone sees the deafen mark).
+  `VoiceRecvClient` joins undeafened (`VoiceProtocol.deaf_by_default`), and
+  `listen()` on a deafened one turns the deafen off first. discord.py's default
+  is `False`.
+- `Guild.change_voice_state()` keeps the bot's mute and deafen when they are
+  left out (they used to go back to `False`), so following a moderator's move no
+  longer undeafens the bot.
+
 - Embeds show their pictures: `set_image()`, `set_thumbnail()` and the `icon_url`
   of `set_author()` and `set_footer()` are sent instead of being kept on the
   `Embed`, and an embed Bisim sends back has its thumbnail and its author and

@@ -810,9 +810,15 @@ class HTTPClient:
     # Voice: the bot's own connection
     # ------------------------------------------------------------------
 
-    def join_voice(self, channel_id: Any, *, self_muted: bool = False, self_deafened: bool = False) -> Coroutine[Any, Any, Any]:
+    def join_voice(
+        self, channel_id: Any, *, self_muted: bool = False, self_deafened: Optional[bool] = None
+    ) -> Coroutine[Any, Any, Any]:
         r = Route('POST', '/channels/{channel_id}/voice/join', channel_id=_snowflake_str(channel_id))
-        return self.request(r, json={'selfMuted': bool(self_muted), 'selfDeafened': bool(self_deafened)})
+        payload: Dict[str, Any] = {'selfMuted': bool(self_muted)}
+        # Left out, Bisim joins a bot deafened.
+        if self_deafened is not None:
+            payload['selfDeafened'] = bool(self_deafened)
+        return self.request(r, json=payload)
 
     def leave_voice(self, channel_id: Any) -> Coroutine[Any, Any, Any]:
         r = Route('POST', '/channels/{channel_id}/voice/leave', channel_id=_snowflake_str(channel_id))

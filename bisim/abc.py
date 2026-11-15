@@ -1694,7 +1694,7 @@ class Connectable(Protocol):
         timeout: float = 30.0,
         reconnect: bool = True,
         cls: Callable[[Client, Connectable], VoiceProtocolT] = VoiceClient,
-        self_deaf: bool = False,
+        self_deaf: Optional[bool] = None,
         self_mute: bool = False,
     ) -> VoiceProtocolT:
         """|coro|
@@ -1718,8 +1718,13 @@ class Connectable(Protocol):
             Defaults to :class:`~bisim.VoiceClient`.
         self_mute: :class:`bool`
             Indicates if the client should be self-muted.
-        self_deaf: :class:`bool`
-            Indicates if the client should be self-deafened.
+        self_deaf: Optional[:class:`bool`]
+            Indicates if the client should be self-deafened. Left out, a
+            :class:`~bisim.VoiceClient` joins deafened and a
+            :class:`~bisim.ext.voice_recv.VoiceRecvClient` does not
+            (``cls.deaf_by_default``; discord.py's default is ``False``).
+            Bisim enforces a bot's deafen: a deafened bot receives no audio,
+            and everyone sees the deafen mark beside it.
 
         Raises
         -------
@@ -1743,6 +1748,9 @@ class Connectable(Protocol):
 
         if state._get_voice_client(key_id):
             raise ClientException('Already connected to a voice channel.')
+
+        if self_deaf is None:
+            self_deaf = bool(getattr(cls, 'deaf_by_default', True))
 
         client = state._get_client()
         voice: VoiceProtocolT = cls(client, self)

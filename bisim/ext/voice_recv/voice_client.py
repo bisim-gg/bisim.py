@@ -29,9 +29,11 @@ class VoiceRecvClient(VoiceClient):
     does (playing, moving, leaving) works the same.
 
     The bot receives the others' audio only while it listens and is not
-    self-deafened (a server deafen also stops it). Each person's audio
-    arrives separately, as 20 ms of 16-bit 48 kHz stereo PCM per
-    :meth:`AudioSink.write`.
+    self-deafened (a server deafen also stops it): Bisim enforces both on
+    its media server. Connecting with this class joins undeafened unless
+    ``self_deaf=True`` is passed, and :meth:`listen` on a deafened client
+    turns its deafen off first. Each person's audio arrives separately, as
+    20 ms of 16-bit 48 kHz stereo PCM per :meth:`AudioSink.write`.
 
     Events, both on the client (``@bot.event``) and on the sink's listeners,
     while listening:
@@ -40,6 +42,9 @@ class VoiceRecvClient(VoiceClient):
     - ``on_voice_member_speaking_stop(member)``
     - ``on_voice_member_disconnect(member, ssrc)``
     """
+
+    #: Listening is hearing: this client joins undeafened unless told otherwise.
+    deaf_by_default = False
 
     def __init__(self, client: Client, channel: Connectable) -> None:
         super().__init__(client, channel)
@@ -57,6 +62,9 @@ class VoiceRecvClient(VoiceClient):
         sink's :meth:`~AudioSink.cleanup`), with the error that stopped it if
         any. It runs on the receive thread.
 
+        A self-deafened bot is undeafened first (Bisim sends a deafened bot
+        no audio); audio arrives once Bisim has the change.
+
         Raises
         -------
         ClientException
@@ -73,6 +81,12 @@ class VoiceRecvClient(VoiceClient):
 
         self._reader = AudioReader(sink, self, after=after)
         self._reader.start()
+        if self._connection.self_deaf:
+            # Asking to listen is asking to hear. The subscriptions follow once Bisim has the change.
+            _log.info('Listening turns the self deafen off.')
+            self.loop.create_task(
+                self._connection.set_self_state(self_mute=self._connection.self_mute, self_deaf=False)
+            )
         room = self.room
         if room is not None:
             from ...voice_state import _rtc

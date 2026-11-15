@@ -62,9 +62,11 @@ async def join(interaction: bisim.Interaction) -> None:
 connecting a second time in the same server raises `bisim.ClientException`, and `guild.voice_client` is
 the connection the bot already has (`None` without one). `client.voice_clients` lists them all.
 
-`connect()` takes discord.py's arguments: `timeout` (seconds, 60 by default), `reconnect` (join again if
+`connect()` takes discord.py's arguments: `timeout` (seconds, 30 by default), `reconnect` (join again if
 the connection is lost, on by default), `self_mute`, `self_deaf` and `cls` (another `VoiceProtocol`, such
-as `voice_recv.VoiceRecvClient`).
+as `voice_recv.VoiceRecvClient`). One default differs: a bot joins deafened unless you pass
+`self_deaf=False` (discord.py's default is `False`), because Bisim keeps a bot from hearing people unless it
+asks to. A `VoiceRecvClient` joins undeafened.
 
 ## Playing a file or a URL
 
@@ -136,7 +138,8 @@ await vc.disconnect()
 
 `await guild.change_voice_state(channel=vc.channel, self_mute=True, self_deaf=True)` changes the bot's own
 mute and deafen, which everyone sees on its name. A self-muted bot is not heard; a self-deafened bot receives
-nothing.
+nothing, which Bisim enforces on its media server whatever the code asks for. Leaving `self_mute` or
+`self_deaf` out of `change_voice_state` keeps it as it is.
 
 The connection follows what happens on the server:
 
@@ -166,6 +169,9 @@ def callback(user, data: voice_recv.VoiceData) -> None:
 vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
 vc.listen(voice_recv.BasicSink(callback))
 ```
+
+A `VoiceRecvClient` joins undeafened, and `listen()` on a deafened one turns the deafen off first: the audio
+starts once Bisim has the change.
 
 Each person's audio arrives on its own, as 20 ms of 16-bit 48 kHz stereo PCM per call (`data.pcm`, 3,840
 bytes); `data.opus` is `None`, since there is no Opus. The callback runs on the receive thread, like `after`.

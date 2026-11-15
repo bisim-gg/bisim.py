@@ -60,6 +60,11 @@ class VoiceProtocol:
         The voice channel that is being connected to.
     """
 
+    #: Whether :meth:`abc.Connectable.connect` joins deafened when ``self_deaf`` is left out. A bot is deafened
+    #: unless it asks to hear (Bisim enforces it: a deafened bot receives no audio); a protocol that receives
+    #: audio, such as :class:`~bisim.ext.voice_recv.VoiceRecvClient`, sets this to ``False``.
+    deaf_by_default: bool = True
+
     def __init__(self, client: Client, channel: abc.Connectable) -> None:
         self.client: Client = client
         self.channel: abc.Connectable = channel
@@ -356,10 +361,15 @@ class VoiceClient(VoiceProtocol):
         """Indicates if the voice client is connected to voice."""
         return self._connection.is_connected()
 
-    async def _change_voice_state(self, channel: Optional[abc.Snowflake], *, self_mute: bool, self_deaf: bool) -> None:
+    async def _change_voice_state(
+        self, channel: Optional[abc.Snowflake], *, self_mute: Optional[bool] = None, self_deaf: Optional[bool] = None
+    ) -> None:
         if channel is None:
             await self.disconnect(force=True)
             return
+        # Left out, each stays as it is: following a moderator's move must not undeafen the bot.
+        self_mute = self._connection.self_mute if self_mute is None else self_mute
+        self_deaf = self._connection.self_deaf if self_deaf is None else self_deaf
         if channel.id != self.channel.id:
             self._connection.self_mute = self_mute
             self._connection.self_deaf = self_deaf

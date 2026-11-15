@@ -2160,7 +2160,7 @@ class Guild(Hashable):
     # ------------------------------------------------------------------
 
     async def change_voice_state(
-        self, *, channel: Optional[abc.Snowflake], self_mute: bool = False, self_deaf: bool = False
+        self, *, channel: Optional[abc.Snowflake], self_mute: Optional[bool] = None, self_deaf: Optional[bool] = None
     ) -> None:
         """|coro|
 
@@ -2177,10 +2177,14 @@ class Guild(Hashable):
         -----------
         channel: Optional[:class:`abc.Snowflake`]
             Channel the client wants to join. Use ``None`` to disconnect.
-        self_mute: :class:`bool`
-            Indicates if the client should be self-muted.
-        self_deaf: :class:`bool`
-            Indicates if the client should be self-deafened.
+        self_mute: Optional[:class:`bool`]
+            Indicates if the client should be self-muted. Left out, it
+            stays as it is (not muted on a new join).
+        self_deaf: Optional[:class:`bool`]
+            Indicates if the client should be self-deafened. Left out, it
+            stays as it is, and a new join is deafened: Bisim joins a bot
+            deafened unless it asks to hear, and a deafened bot receives no
+            audio (discord.py's defaults are ``False``).
         """
         state = self._state
         voice = state._get_voice_client(self.id)
@@ -2202,10 +2206,11 @@ class Guild(Hashable):
             return
 
         if channel.id == current:
-            await http.edit_voice_state(channel.id, selfMuted=self_mute, selfDeafened=self_deaf)
+            changes = {'selfMuted': self_mute, 'selfDeafened': self_deaf}
+            await http.edit_voice_state(channel.id, **{k: v for k, v in changes.items() if v is not None})
             return
 
-        data = await http.join_voice(channel.id, self_muted=self_mute, self_deafened=self_deaf)
+        data = await http.join_voice(channel.id, self_muted=bool(self_mute), self_deafened=self_deaf)
         if voice is not None:
             payload = dict(data or {})
             payload.update(guild_id=str(self.id), channel_id=str(channel.id), endpoint=payload.get('url'))
