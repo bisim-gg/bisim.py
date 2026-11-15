@@ -24,6 +24,10 @@ All notable changes to bisim.py are listed here.
   `Guild.chunk()` and `Guild.fetch_members()` raise `ClientException`, as in
   discord.py. Without `presences`, startup no longer waits for presence
   snapshots that will not come.
+- Without `members`, whoever is in voice or adds a reaction is still a cached
+  `Member` with their roles, from the member Bisim now sends with a voice state
+  (at startup and live) and a reaction, as Discord does: `voice_recv` hands a
+  `Member` again, and `on_raw_reaction_add`'s `member` is set.
 - New events: `on_member_ban`, `on_member_unban`, `on_invite_create`,
   `on_invite_delete`, `on_audit_log_entry_create`, `on_webhooks_update`,
   `on_automod_rule_create`, `on_automod_rule_update`, `on_automod_rule_delete`

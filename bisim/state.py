@@ -865,6 +865,11 @@ class ConnectionState:
         guild = self._get_guild(raw.guild_id)
         if guild is not None:
             raw.member = guild.get_member(raw.user_id)
+            # Discord's member on a reaction in a server: known without the members intent.
+            member_data = payload.get('member')
+            if raw.member is None and isinstance(member_data, dict) and member_data.get('user'):
+                raw.member = Member(data={**member_data, 'userId': str(raw.user_id)}, guild=guild, state=self)
+                guild._add_member(raw.member)
         message = self._get_message(raw.message_id)
         if message is not None:
             raw.message_author_id = message.author.id

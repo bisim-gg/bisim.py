@@ -96,6 +96,32 @@ async def test_default_intents_do_not_chunk_or_wait_for_presences(lean_client, f
     assert not fake.requests_to('GET', f'/guilds/{p.GUILD_ID}/members')
 
 
+async def test_voice_and_reactions_carry_members_without_the_intent(lean_client, fake):
+    """Discord gives the member of whoever is in voice or reacts, so a default-intents bot knows them as Members."""
+    client = lean_client
+    guild = client.get_guild(int(p.GUILD_ID))
+    member = {'userId': '60000000000000901', 'nickname': 'Caz', 'roleIds': [p.GUILD_ID, p.MOD_ROLE_ID],
+              'joinedAt': '2026-07-02T00:00:00.000Z',
+              'user': {'id': '60000000000000901', 'username': 'carol', 'displayName': 'Carol'}}
+    await fake.send(p.envelope('VOICE_STATE_UPDATE', guildId=p.GUILD_ID, channelId=p.VOICE_ID,
+                               voiceState={'userId': member['userId'], 'user': member['user'], 'member': member}))
+    await wait_until(lambda: guild.get_member(int(member['userId'])) is not None)
+    carol = guild.get_member(int(member['userId']))
+    assert isinstance(carol, bisim.Member) and carol.nick == 'Caz'
+    assert any(r.id == int(p.MOD_ROLE_ID) for r in carol.roles)
+    assert carol.voice is not None and carol.voice.channel is not None and carol.voice.channel.id == int(p.VOICE_ID)
+
+    reacting = {'userId': '60000000000000902', 'roleIds': [p.GUILD_ID], 'joinedAt': '2026-07-03T00:00:00.000Z',
+                'user': {'id': '60000000000000902', 'username': 'erin', 'displayName': 'Erin'}}
+    await fake.send(p.envelope('MESSAGE_REACTION_ADD', guildId=p.GUILD_ID, channelId=p.TEXT_ID,
+                               reaction={'messageId': p.MESSAGE_ID, 'channelId': p.TEXT_ID, 'guildId': p.GUILD_ID,
+                                         'userId': reacting['userId'], 'emoji': '👍', 'member': reacting}))
+    await client.wait_event('raw_reaction_add')
+    raw = client.events('raw_reaction_add')[-1][0]
+    assert isinstance(raw.member, bisim.Member) and raw.member.name == 'erin'
+    assert guild.get_member(int(reacting['userId'])) is raw.member
+
+
 async def test_the_members_intent_chunks(client, fake):
     assert fake.requests_to('GET', f'/guilds/{p.GUILD_ID}/members')
     assert client.get_guild(int(p.GUILD_ID)).chunked

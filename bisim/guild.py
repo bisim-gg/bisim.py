@@ -381,7 +381,17 @@ class Guild(Hashable):
             channel = self.get_channel(utils._snowflake(raw.get('channelId')) or 0)
             user_id = int(raw['userId'])
             self._voice_states[user_id] = VoiceState(data=raw, channel=channel)
-            if user_id not in self._members and raw.get('username'):
+            # Discord gives the member of everyone in voice, so they are known without the members intent.
+            if user_id not in self._members and isinstance(raw.get('member'), dict):
+                user = {
+                    'id': str(user_id),
+                    'username': raw.get('username'),
+                    'displayName': raw.get('displayName'),
+                    'avatarKey': raw.get('avatarKey'),
+                    'bot': bool(raw['member'].get('bot')),
+                }
+                self._add_member(Member(data={**raw['member'], 'userId': str(user_id), 'user': user}, guild=self, state=self._state))
+            elif user_id not in self._members and raw.get('username'):
                 self._state.store_user(
                     {
                         'id': user_id,
@@ -412,6 +422,15 @@ class Guild(Hashable):
             self._voice_states[user_id] = after
 
         member = self.get_member(user_id)
+        # Discord's member on a voice state: cache it, so whoever is in voice is a known Member without the members intent.
+        if isinstance(data.get('member'), dict) and data['member'] and not data.get('left'):
+            raw_member = data['member']
+            if member is None:
+                user_data = raw_member.get('user') or data.get('user') or {'id': str(user_id)}
+                member = Member(data={**raw_member, 'userId': str(user_id), 'user': user_data}, guild=self, state=self._state)
+                self._add_member(member)
+            else:
+                member._update(raw_member)
         if member is None and isinstance(data.get('user'), dict) and data['user']:
             user_data = data['user']
             member = Member(
