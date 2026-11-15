@@ -14,7 +14,7 @@ __title__ = 'bisim'
 __author__ = 'Bisim'
 __license__ = 'MIT'
 __copyright__ = 'Copyright 2026 Bisim'
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 
 __path__ = __import__('pkgutil').extend_path(__path__, __name__)
 

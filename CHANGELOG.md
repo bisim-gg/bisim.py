@@ -4,6 +4,8 @@ All notable changes to bisim.py are listed here.
 
 ## Unreleased
 
+## 0.3.0 (2026-11-15)
+
 - Intents work as on Discord. The client sends its `intents` when it connects,
   and Bisim sends only the events they cover. `Intents.default()` leaves out
   the three privileged intents (`members`, `presences`, `message_content`);
@@ -113,7 +115,7 @@ All notable changes to bisim.py are listed here.
   (bisim.gg/developers), and that the first followup after `defer()` fills the
   "thinking" message.
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-14)
 
 Voice: a bot joins voice channels, plays sound and hears what is said, with
 discord.py's API.
