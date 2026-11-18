@@ -956,8 +956,22 @@ class HTTPClient:
     # Bans
     # ------------------------------------------------------------------
 
-    def get_bans(self, guild_id: Any) -> Coroutine[Any, Any, Any]:
-        return self.request(Route('GET', '/guilds/{guild_id}/bans', guild_id=_snowflake_str(guild_id)))
+    def get_bans(
+        self,
+        guild_id: Any,
+        limit: Optional[int] = None,
+        before: Optional[Any] = None,
+        after: Optional[Any] = None,
+    ) -> Coroutine[Any, Any, Any]:
+        """One page of bans, in ascending order of user id (1000 at most)."""
+        params: Dict[str, Any] = {}
+        if limit is not None:
+            params['limit'] = limit
+        if before is not None:
+            params['before'] = before
+        if after is not None:
+            params['after'] = after
+        return self.request(Route('GET', '/guilds/{guild_id}/bans', guild_id=_snowflake_str(guild_id)), params=params)
 
     def get_ban(self, user_id: Any, guild_id: Any) -> Coroutine[Any, Any, Any]:
         r = Route('GET', '/guilds/{guild_id}/bans/{user_id}', guild_id=_snowflake_str(guild_id), user_id=_snowflake_str(user_id))

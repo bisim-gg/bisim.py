@@ -1756,19 +1756,63 @@ class Guild(Hashable):
         if before is not utils.MISSING and after is not utils.MISSING:
             raise TypeError('bans pagination does not support both before and after')
 
-        data = await self._state.http.get_bans(self.id)
-        entries = sorted(data or [], key=lambda d: int(d.get('userId') or d.get('user', {}).get('id') or 0))
-        if before is not utils.MISSING:
-            entries = [d for d in entries if int(d.get('userId') or 0) < before.id]
-            entries.reverse()
-        elif after is not utils.MISSING:
-            entries = [d for d in entries if int(d.get('userId') or 0) > after.id]
-        count = 0
-        for raw in entries:
-            yield self._ban_entry(raw)
-            count += 1
-            if limit is not None and count >= limit:
+        # This endpoint paginates in ascending order of user id, 1000 at most a page.
+        endpoint = self._state.http.get_bans
+
+        def user_id_of(raw: Dict[str, Any]) -> int:
+            return int(raw.get('userId') or raw['user']['id'])
+
+        async def _before_strategy(retrieve: int, before: Optional[Snowflake], limit: Optional[int]):
+            before_id = before.id if before else None
+            data = await endpoint(self.id, limit=retrieve, before=before_id)
+
+            if data:
+                if limit is not None:
+                    limit -= len(data)
+
+                before = Object(id=user_id_of(data[0]))
+
+            return data, before, limit
+
+        async def _after_strategy(retrieve: int, after: Optional[Snowflake], limit: Optional[int]):
+            # No cursor is the first page, from the lowest user id.
+            after_id = after.id if after else 0
+            data = await endpoint(self.id, limit=retrieve, after=after_id)
+
+            if data:
+                if limit is not None:
+                    limit -= len(data)
+
+                after = Object(id=user_id_of(data[-1]))
+
+            return data, after, limit
+
+        state: Optional[Snowflake]
+        if before:
+            strategy, state = _before_strategy, before
+        else:
+            strategy, state = _after_strategy, (after or None)
+
+        while True:
+            retrieve = 1000 if limit is None else min(limit, 1000)
+            if retrieve < 1:
                 return
+
+            previous = state.id if state else None
+            data, state, limit = await strategy(retrieve, state, limit)
+            data = data or []
+
+            # A page that does not move the cursor is one the server answered
+            # without it: it was read already, so stop here.
+            if previous is not None and state is not None and state.id == previous:
+                return
+
+            # Terminate loop on next iteration; there's no data left after this
+            if len(data) < 1000:
+                limit = 0
+
+            for e in data:
+                yield self._ban_entry(e)
 
     # ------------------------------------------------------------------
     # Roles
